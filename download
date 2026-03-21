@@ -1,0 +1,30 @@
+# ── Clínica Thomaz Almeida · Segurança ──────────────────────
+
+# Bloqueia acesso DIRETO ao app.html pelo navegador
+# Só funciona se acessado via app.php (que verifica a sessão)
+<Files "app.html">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Bloqueia listagem de pastas
+Options -Indexes
+
+# Bloqueia acesso ao próprio .htaccess
+<Files ".htaccess">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Headers de segurança
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "DENY"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "no-referrer"
+</IfModule>
+
+# Força HTTPS — descomente após ativar SSL no cPanel
+# RewriteEngine On
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
