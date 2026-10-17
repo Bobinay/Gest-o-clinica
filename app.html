@@ -122,7 +122,12 @@ button{cursor:pointer}
 /* SESSION ROW */
 .sr{border-bottom:1px solid var(--bd);padding-bottom:13px;margin-bottom:13px}
 .sg{display:flex;gap:11px;align-items:flex-start}
-.sd{min-width:66px;padding-top:2px;flex-shrink:0}
+.sd{min-width:66px;padding-top:2px;flex-shrink:0;display:flex;flex-direction:column;gap:4px}
+.sd .inp{padding:4px 6px;font-size:12px;color:var(--gold);width:128px;background:transparent;border-color:transparent;cursor:pointer}
+.sd .inp:hover,.sd .inp:focus{border-color:var(--bd2);background:#0d0d0d}
+.sd .stime{color:var(--dim);font-size:11px;width:90px}
+.sr.flash{animation:flash 2s ease}
+@keyframes flash{0%,40%{background:#2a2010}100%{background:transparent}}
 .sb2{flex:1;min-width:0}
 .spp{min-width:94px;text-align:right;padding-top:2px;flex-shrink:0}
 
@@ -157,6 +162,7 @@ button{cursor:pointer}
   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
 }
 @media(max-width:480px){
+  .sd{flex-direction:row;width:100%;align-items:center}
   .g3{grid-template-columns:1fr}.g4{grid-template-columns:1fr 1fr}
   .sg{flex-wrap:wrap}.spp{min-width:100%;text-align:left;display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;flex:1 1 100%}.toast{max-width:none;width:auto}.spp br{display:none}.sync{font-size:0}.sync::before{content:attr(data-i);font-size:14px}
   .fg{grid-template-columns:1fr!important}
@@ -726,7 +732,10 @@ function rPatient(c,pt,ps,ta){
         ${s.paid?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updSessField(${p.id},${s.id},'payMethod',this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
         <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${s.paid?'Desmarcar':'Marcar Pago'}</button>`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
       return`<div class="sr"><div class="sg">
-        <div class="sd"><div style="font-size:13px;color:var(--gold)">${fmtD(s.date)}</div><div style="font-size:10px;color:var(--dim);font-family:var(--sans);margin-top:1px">${s.time}</div></div>
+        <div class="sd" id="sess-${s.id}">
+          <input type="date" class="inp sdate" value="${s.date}" title="Data da sessão (pode corrigir)" onchange="updSessWhen(${p.id},${s.id},'date',this.value)">
+          <input type="time" class="inp stime" value="${s.time||''}" title="Horário" onchange="updSessWhen(${p.id},${s.id},'time',this.value)">
+        </div>
         <div class="sb2">
           <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:7px">
             <span class="bdg" style="background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>
@@ -1033,27 +1042,59 @@ function saveNewPat(){
 }
 
 // ── NEW SESSION ───────────────────────────────────────────────
+// Data de N dias atrás (fuso local)
+function diasAtras(n){const d=new Date();d.setDate(d.getDate()-n);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+
 function rNewSess(c){
   const p=gp(apid);if(!p)return;
   const prevMsg=waMsg(p,td(),'10:00');
+  // Sessões agendadas que já passaram e ainda não foram registradas (evita criar duplicada)
+  const pend=(p.sessions||[]).filter(s=>s.status==='agendada'&&s.date<=td()).sort((a,b)=>b.date.localeCompare(a.date)||(b.time||'').localeCompare(a.time||''));
+  const pendHtml=pend.length?`<div style="background:#1a1508;border:1px solid #3a2a10;border-radius:8px;padding:12px;margin-bottom:16px">
+      <div class="ml" style="color:var(--gold);margin-bottom:8px">Já existe sessão agendada sem registro</div>
+      ${pend.slice(0,4).map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;font-family:var(--sans);font-size:12px;flex-wrap:wrap">
+        <span style="color:var(--cream)">${fmtD(s.date)} · ${s.time||'--'}${s.date===td()?' <span style="color:var(--gold)">(hoje)</span>':s.date===diasAtras(1)?' <span style="color:var(--gold)">(ontem)</span>':''}</span>
+        <button class="btn bp bs" onclick="registrarPendente(${p.id},${s.id})">Registrar esta</button></div>`).join('')}
+      <div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-top:6px">Ou preencha abaixo para criar uma sessão nova.</div>
+    </div>`:'';
+  const chip=(n,l)=>`<button type="button" class="btn bg bs" style="padding:3px 9px" onclick="setNsDate('${diasAtras(n)}')">${l}</button>`;
   c.innerHTML=`<div class="card" style="max-width:500px">
+    ${pendHtml}
     <div class="g2 fg" style="gap:13px">
-      <div class="fi"><label>Data</label><input type="date" class="inp" id="ns-date" value="${td()}"></div>
+      <div class="fi"><label style="display:flex;justify-content:space-between;align-items:center">Data <span style="display:flex;gap:4px">${chip(0,'Hoje')}${chip(1,'Ontem')}</span></label><input type="date" class="inp" id="ns-date" value="${td()}" onchange="nsDateChanged()"></div>
       <div class="fi"><label>Horário</label><input type="time" class="inp" id="ns-time" value="10:00"></div>
-      <div class="fi"><label>Status</label><select class="sel" id="ns-status">${Object.entries(ST).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></div>
+      <div class="fi"><label>Status</label><select class="sel" id="ns-status" onchange="this.dataset.manual='1'">${Object.entries(ST).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></div>
       <div class="fi"><label>Humor</label><select class="sel" id="ns-mood"><option value="">—</option>${MOODS.map(m=>`<option>${m}</option>`).join('')}</select></div>
     </div>
     <div class="fi"><label>Temas da Sessão</label><input type="text" class="inp" id="ns-themes" placeholder="ex: sonhos, luto, relação com pai"></div>
     <div class="fi"><label>Anotações</label><textarea class="ta" id="ns-notes" placeholder="Anotações clínicas…"></textarea></div>
-    <div style="background:#071410;border:1px solid var(--gbd);border-radius:8px;padding:14px;margin-bottom:14px">
+    <div id="ns-wa" style="background:#071410;border:1px solid var(--gbd);border-radius:8px;padding:14px;margin-bottom:14px">
       <div class="ml" style="color:var(--green);margin-bottom:7px">Ao salvar como Agendada, esta mensagem abre pronta</div>
       <div style="font-size:11px;color:#888;font-family:var(--sans);line-height:1.85;white-space:pre-wrap">${esc(prevMsg)}</div>
     </div>
     <div style="display:flex;gap:10px">
-      <button class="btn bp" onclick="saveNewSess()">Salvar e Notificar</button>
+      <button class="btn bp" id="ns-save" onclick="saveNewSess()">Salvar e Notificar</button>
       <button class="btn bg" onclick="go('patient',${p.id},'sessoes')">Cancelar</button>
     </div>
   </div>`;
+  nsDateChanged();
+}
+function setNsDate(d){const el=document.getElementById('ns-date');if(el){el.value=d;nsDateChanged();}}
+// Status sugerido pela data: passado → Realizada; hoje ou futuro → Agendada (se não escolhido à mão)
+function nsDateChanged(){
+  const d=document.getElementById('ns-date')?.value,st=document.getElementById('ns-status');if(!d||!st)return;
+  if(!st.dataset.manual)st.value=d<td()?'realizada':'agendada';
+  const ag=st.value==='agendada';
+  const wa=document.getElementById('ns-wa');if(wa)wa.style.display=ag?'':'none';
+  const b=document.getElementById('ns-save');if(b)b.textContent=ag?'Salvar e Notificar':'Salvar Sessão';
+}
+// Abre uma sessão agendada que já passou, marcada como Realizada, pronta para anotar
+function registrarPendente(pid,sid){
+  const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;
+  s.status='realizada';save();
+  go('patient',pid,'sessoes');flashSess(sid);
+  setTimeout(()=>{const el=document.getElementById('sess-'+sid);const ta=el&&el.closest('.sr')?.querySelector('textarea');if(ta)ta.focus();},500);
+  showToast(`Sessão de ${fmtD(s.date)} marcada como Realizada. Escreva a anotação.`);
 }
 
 function saveNewSess(){
@@ -1064,7 +1105,7 @@ function saveNewSess(){
   const p=gp(apid);if(!p)return;
   const sess={id:Date.now(),date,time,status,value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:document.getElementById('ns-mood').value,themes:document.getElementById('ns-themes').value.trim(),notes:document.getElementById('ns-notes').value.trim()};
   if(!p.sessions)p.sessions=[];
-  p.sessions.push(sess);p.sessions.sort((a,b)=>a.date.localeCompare(b.date));
+  p.sessions.push(sess);sortSess(p);
   save();showToast('Sessão salva!');
   go('patient',p.id,'sessoes');
   if(status==='agendada')setTimeout(()=>openSchedModal(p.id,sess.id),200);
@@ -1073,6 +1114,16 @@ function saveNewSess(){
 // ── MUTATIONS ────────────────────────────────────────────────
 function updPat(id,field,value){const p=gp(id);if(!p)return;p[field]=value;save();}
 function updAnamnese(id,field,value){const p=gp(id);if(!p)return;if(!p.anamnese)p.anamnese={};p.anamnese[field]=value;save();}
+// Mantém as sessões em ordem de data e horário
+function sortSess(p){(p.sessions||[]).sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''));}
+// Corrige data/horário de uma sessão já registrada
+function updSessWhen(pid,sid,field,value){
+  const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s||!value)return;
+  s[field]=value;sortSess(p);save();
+  showToast(field==='date'?`Data alterada para ${fmtD(value)}.`:`Horário alterado para ${value}.`);
+  go('patient',pid,'sessoes');flashSess(sid);
+}
+function flashSess(sid){setTimeout(()=>{const el=document.getElementById('sess-'+sid);const row=el&&el.closest('.sr');if(row){row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('flash');}},120);}
 function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.status=status;save();go('patient',pid,'sessoes');}
 function updSessField(pid,sid,field,value){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s[field]=value;save();}
 function markPaid(p,s,paid,method){s.paid=paid;s.paidAmount=paid?sv(p,s):0;s.paidDate=paid?td():'';if(paid&&method)s.payMethod=method;if(!paid)s.payMethod='';}
