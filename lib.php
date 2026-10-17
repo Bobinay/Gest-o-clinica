@@ -10,6 +10,7 @@ define('DATA_FILE',   DADOS_DIR . '/clinica.json');  // pacientes, sessões, fin
 define('BACKUP_DIR',  DADOS_DIR . '/backups');       // 1 cópia por dia, últimos 60 dias
 define('TENTATIVAS',  DADOS_DIR . '/tentativas.json');
 define('INATIVIDADE', 8 * 3600);                     // logout após 8h sem uso
+define('AGENDA_TOKEN', DADOS_DIR . '/agenda_token.php'); // chave do Google Agenda (feed.php)
 
 date_default_timezone_set('America/Sao_Paulo');
 
@@ -60,6 +61,20 @@ function gravar_hash(string $senha): void {
     $hash = password_hash($senha, PASSWORD_DEFAULT);
     file_put_contents(SENHA_FILE, "<?php\nreturn " . var_export($hash, true) . ";\n", LOCK_EX);
     @chmod(SENHA_FILE, 0600);
+}
+
+function ler_token_agenda(): string {
+    if (!file_exists(AGENDA_TOKEN)) return '';
+    $t = include AGENDA_TOKEN;
+    return is_string($t) ? $t : '';
+}
+
+function gerar_token_agenda(): string {
+    garantir_pasta_dados();
+    $t = bin2hex(random_bytes(24));
+    file_put_contents(AGENDA_TOKEN, "<?php\nreturn " . var_export($t, true) . ";\n", LOCK_EX);
+    @chmod(AGENDA_TOKEN, 0600);
+    return $t;
 }
 
 function logado(): bool {

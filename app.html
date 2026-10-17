@@ -1172,6 +1172,18 @@ function rSettings(c){
       <div class="fi"><label>Forma de pagamento padrão</label><select class="sel" onchange="updSetting('defaultPay',this.value)"><option value="">—</option>${PAYS.map(m=>`<option${settings.defaultPay===m?' selected':''}>${m}</option>`).join('')}</select></div>
     </div>
   </div>
+  <div class="card" style="max-width:560px;margin-bottom:14px">
+    <span class="ml" style="margin-bottom:10px">Google Agenda (notificações dos atendimentos)</span>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.8;margin-bottom:12px">
+      As sessões aparecem sozinhas numa agenda <em>"Clínica – Atendimentos"</em> no seu Google Agenda, com lembretes no celular.
+      Remarcou ou cancelou aqui? Em até 15 minutos o Google Agenda acompanha. Anotações clínicas <strong>não</strong> são enviadas.
+    </div>
+    <div class="g2 fg" style="gap:13px">
+      <div class="fi"><label>Duração da sessão (min)</label><input type="number" min="10" max="240" class="inp" value="${esc(settings.sessionMinutes||50)}" onchange="updSetting('sessionMinutes',parseInt(this.value)||50)"></div>
+      <div class="fi"><label>Lembretes (min antes)</label><input type="text" class="inp" value="${esc(settings.reminders||'60, 10')}" placeholder="60, 10" onchange="updSetting('reminders',this.value.trim())"></div>
+    </div>
+    <div id="gcal-box"><button class="btn bp bs" onclick="gcalSetup(false)">Gerar programa do Google Agenda</button></div>
+  </div>
   <div class="card" style="max-width:560px">
     <span class="ml" style="margin-bottom:10px">Segurança e sigilo</span>
     <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.8">
@@ -1182,6 +1194,111 @@ function rSettings(c){
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn bg bs" onclick="exportJSON()">↓ Baixar backup agora</button><button class="btn bg bs" onclick="location.href='senha.php'">Trocar senha</button></div>
   </div>`;
+}
+
+// ── GOOGLE AGENDA ─────────────────────────────────────────────
+// Gera o Google Apps Script (roda na conta Google do usuário) que lê feed.php
+// a cada 15 min e mantém a agenda "Clínica – Atendimentos" sincronizada.
+function gcalScript(feedUrl,token){
+  return`// Clínica · sincronização com o Google Agenda
+// Cole este código em script.google.com e rode a função "instalar" uma vez.
+const FEED_URL = '${feedUrl}';
+const TOKEN = '${token}';
+
+function instalar() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sincronizar') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sincronizar').timeBased().everyMinutes(15).create();
+  sincronizar();
+}
+
+function sincronizar() {
+  const res = UrlFetchApp.fetch(FEED_URL + '?token=' + encodeURIComponent(TOKEN), { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('App respondeu HTTP ' + res.getResponseCode());
+  const feed = JSON.parse(res.getContentText());
+  const cfg = feed.config;
+  const cal = obterAgenda(cfg.calendarName);
+
+  // Eventos já criados por este programa, pela identificação da sessão
+  const existentes = {};
+  cal.getEvents(new Date(feed.from), new Date(feed.to)).forEach(function (ev) {
+    const id = ev.getTag('clinicaId');
+    if (!id) return;
+    if (existentes[id]) { ev.deleteEvent(); return; }   // duplicado
+    existentes[id] = ev;
+  });
+
+  const vistos = {};
+  feed.sessions.forEach(function (s) {
+    vistos[s.id] = true;
+    const ini = new Date(s.start);
+    const fim = new Date(ini.getTime() + cfg.duration * 60000);
+    const assinatura = [s.title, s.start, cfg.duration, s.location, s.description, cfg.reminders.join(',')].join('|');
+    let ev = existentes[s.id];
+    if (ev && ev.getTag('assinatura') === assinatura) return;   // nada mudou
+    if (!ev) {
+      ev = cal.createEvent(s.title, ini, fim, { description: s.description, location: s.location });
+      ev.setTag('clinicaId', s.id);
+    } else {
+      ev.setTitle(s.title);
+      ev.setTime(ini, fim);
+      ev.setDescription(s.description);
+      ev.setLocation(s.location);
+    }
+    ev.removeAllReminders();
+    cfg.reminders.forEach(function (m) { ev.addPopupReminder(m); });
+    ev.setTag('assinatura', assinatura);
+  });
+
+  // Cancelada ou apagada no app → some do Google Agenda
+  Object.keys(existentes).forEach(function (id) {
+    if (!vistos[id]) existentes[id].deleteEvent();
+  });
+}
+
+function obterAgenda(nome) {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('calendarId');
+  let cal = id ? CalendarApp.getCalendarById(id) : null;
+  if (!cal) {
+    cal = CalendarApp.createCalendar(nome, { color: CalendarApp.Color.YELLOW, timeZone: 'America/Sao_Paulo' });
+    props.setProperty('calendarId', cal.getId());
+  }
+  return cal;
+}
+`;
+}
+
+async function gcalSetup(nova){
+  if(nova&&!confirm('Gerar uma chave nova? O programa atual no Google para de funcionar até você colar o novo.'))return;
+  if(dirty||saving)await flush();
+  let j;
+  try{
+    const r=await fetch('api.php?acao=agenda_token'+(nova?'&nova=1':''),{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':CSRF}});
+    if(r.status===401){location.href='index.php';return;}
+    j=await r.json();if(!j.token)throw 0;
+  }catch{showToast('Não foi possível gerar a chave.','err');return;}
+  const feedUrl=new URL('feed.php',location.href).href;
+  const code=gcalScript(feedUrl,j.token);
+  document.getElementById('gcal-box').innerHTML=`
+    <div style="font-size:12px;color:#bbb;font-family:var(--sans);line-height:1.9;margin:4px 0 10px">
+      <strong style="color:var(--gold)">1.</strong> Clique em <em>Copiar programa</em>.<br>
+      <strong style="color:var(--gold)">2.</strong> Abra <a href="https://script.google.com/create" target="_blank" style="color:var(--gold)">script.google.com/create</a>, apague o que estiver lá e cole (Ctrl+V).<br>
+      <strong style="color:var(--gold)">3.</strong> Salve (Ctrl+S), escolha a função <em>instalar</em> no topo e clique em <em>Executar</em>.<br>
+      <strong style="color:var(--gold)">4.</strong> Autorize o acesso à sua agenda quando o Google pedir.
+    </div>
+    <textarea id="gcal-code" class="ta" readonly style="min-height:90px;font-family:monospace;font-size:10px;color:#888">${esc(code)}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn bp bs" onclick="gcalCopy()">Copiar programa</button>
+      <button class="btn bg bs" onclick="gcalSetup(true)">Gerar chave nova</button>
+    </div>`;
+}
+function gcalCopy(){
+  const ta=document.getElementById('gcal-code');if(!ta)return;
+  const done=()=>showToast('Programa copiado! Cole no script.google.com.');
+  if(navigator.clipboard)navigator.clipboard.writeText(ta.value).then(done,()=>{ta.select();document.execCommand('copy');done();});
+  else{ta.select();document.execCommand('copy');done();}
 }
 
 // ── CSV EXPORT ────────────────────────────────────────────────

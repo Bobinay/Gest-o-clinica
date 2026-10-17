@@ -35,6 +35,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') responder(405, ['erro' => 'metodo']);
 if (!csrf_ok($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null)) responder(403, ['erro' => 'csrf']);
 
+// Chave do Google Agenda: devolve a atual (ou cria). ?acao=agenda_token&nova=1 troca a chave.
+if (($_GET['acao'] ?? '') === 'agenda_token') {
+    $t = !empty($_GET['nova']) ? gerar_token_agenda() : (ler_token_agenda() ?: gerar_token_agenda());
+    responder(200, ['token' => $t]);
+}
+
 $in = json_decode((string)file_get_contents('php://input'), true);
 if (!is_array($in) || !isset($in['data']) || !is_array($in['data'])
     || !isset($in['data']['patients']) || !is_array($in['data']['patients'])) {
