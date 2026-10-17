@@ -399,7 +399,7 @@ const netK=k=>Number(k.net??k.amount??0);
 // (o pacote conta pelo valor combinado, na data do pagamento — ver finPac)
 function sumBill(p,sess){const b=sess.filter(s=>isBill(s)&&!s.pkg&&!s.free);const total=b.reduce((a,s)=>a+sv(p,s),0);const paid=b.reduce((a,s)=>a+Number(s.paidAmount||0),0);const net=b.filter(s=>s.paid).reduce((a,s)=>a+netS(s),0);return{total,paid,net,pending:total-paid,count:b.length};}
 // Pacotes pagos no período (bruto e líquido)
-function finPac(p,from,to){const ks=(p.pacotes||[]).filter(k=>k.date>=from&&k.date<=to);return{total:ks.reduce((a,k)=>a+Number(k.amount||0),0),net:ks.reduce((a,k)=>a+netK(k),0),n:ks.length};}
+function finPac(p,from,to){const ks=(p.pacotes||[]).filter(k=>k.tipo!=='parcelado'&&k.date>=from&&k.date<=to);return{total:ks.reduce((a,k)=>a+Number(k.amount||0),0),net:ks.reduce((a,k)=>a+netK(k),0),n:ks.length};}
 // Resumo financeiro de um paciente num período: avulsas pela data da sessão + pacotes pela data do pagamento
 function finPeriodo(p,from,to){
   const a=sumBill(p,(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to)),k=finPac(p,from,to);
@@ -435,7 +435,7 @@ function mData(from,to){
     if(isBill(s)&&!s.pkg&&!s.free){map[k].gerado+=sv(p,s);map[k].recebido+=Number(s.paidAmount||0);}
   }));
   // Pacotes entram no mês em que foram pagos
-  patients.forEach(p=>(p.pacotes||[]).filter(x=>x.date>=from&&x.date<=to).forEach(x=>{
+  patients.forEach(p=>(p.pacotes||[]).filter(x=>x.tipo!=='parcelado'&&x.date>=from&&x.date<=to).forEach(x=>{
     const k=x.date.slice(0,7);if(!map[k])map[k]={month:k,gerado:0,recebido:0};
     map[k].gerado+=Number(x.amount||0);map[k].recebido+=Number(x.amount||0);
   }));
@@ -771,7 +771,7 @@ function rPatient(c,pt,ps,ta){
       const fechou=!s.paid&&!pk&&isBill(s)&&mesFechou(p,s);
       const freeBtn=`<button class="btn ${fechou?'bp':'bg'} bs" style="margin-top:5px" title="Sessão sobressalente: realizada, mas sem cobrança" onclick="setSemCusto(${p.id},${s.id},true)">${fechou?'Mês fechou · sem custo?':'Sem custo'}</button>`;
       const pay=s.free&&isBill(s)?`<div style="font-size:11px;color:var(--purple);font-family:var(--sans);margin-bottom:6px" title="Realizada, mas fora do faturamento">🎁 Sem custo<br><span style="font-size:10px;color:var(--dim)">(sobressalente do mês)</span></div><button class="btn bg bs" onclick="setSemCusto(${p.id},${s.id},false)">Cobrar normalmente</button>`:pk&&!isBill(s)?pkB:isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
-        ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:'✗ Pendente'}</div>`}
+        ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:(()=>{const kc=cicloParcelado(p,s.date);if(!kc)return'✗ Pendente';const g=progressoCiclo(p,kc);return`✗ Pendente<br><span style="color:var(--gold)">📦 ciclo: ${fmt(g.pago)} de ${fmt(kc.amount)}</span>`;})()}</div>`}
         ${s.paid&&!pk?`<div style="font-size:10px;font-family:var(--sans);margin-bottom:5px;color:var(--dim);cursor:pointer" title="Toque para corrigir o valor que entrou na conta" onclick="editLiquido(${p.id},${s.id})">na conta: <span style="color:var(--green);text-decoration:underline dotted">${fmt(netS(s))}</span></div>`:''}
         ${s.paid&&!pk?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updPayMethod(${p.id},${s.id},this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
         <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':'Marcar Pago'}</button>${!s.paid&&!pk?`<br>${freeBtn}`:''}`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
@@ -806,7 +806,7 @@ function rPatient(c,pt,ps,ta){
       </div></div>`;
     }).join('');
 
-    body=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><span class="ml" style="margin-bottom:0">Histórico de Sessões (${(p.sessions||[]).length})</span><button class="btn bp bs" onclick="go('new-session',${p.id})">+ Nova Sessão</button></div>${(p.sessions||[]).length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhuma sessão registrada.</div>':sessHtml}</div>`;
+    body=`${cicloBanner(p)}<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><span class="ml" style="margin-bottom:0">Histórico de Sessões (${(p.sessions||[]).length})</span><button class="btn bp bs" onclick="go('new-session',${p.id})">+ Nova Sessão</button></div>${(p.sessions||[]).length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhuma sessão registrada.</div>':sessHtml}</div>`;
   }
 
   else if(patTab==='timeline'){
@@ -1194,6 +1194,7 @@ function setSemCusto(pid,sid,on){
 }
 // O mês desta sessão já somou o valor mensal combinado com o paciente? (pagamento por sessão)
 function mesFechou(p,s){
+  const kc=cicloParcelado(p,s.date);if(kc)return progressoCiclo(p,kc).completo;
   const teto=Number(p.packageValue||0);if(!teto)return false;
   const m=s.date.slice(0,7);
   const pago=(p.sessions||[]).filter(x=>x!==s&&x.paid&&!x.pkg&&x.date.startsWith(m)).reduce((a,x)=>a+Number(x.paidAmount||0),0);
@@ -1585,7 +1586,19 @@ function gerarSessoes(pids,mes){
 // Um pacote cobre um período: toda sessão nele fica paga automaticamente,
 // inclusive as criadas depois. Ex.: pago dia 14/10 → válido até 13/11.
 function pacoteDe(p,id){return(p.pacotes||[]).find(k=>k.id===id)||null;}
-function pacoteCobrindo(p,date){return(p.pacotes||[]).find(k=>date>=k.from&&date<=k.to)||null;}
+// Pacote pago adiantado que cobre a data (marca as sessões como pagas)
+function pacoteCobrindo(p,date){return(p.pacotes||[]).find(k=>k.tipo!=='parcelado'&&date>=k.from&&date<=k.to)||null;}
+// Pacote mensal pago por sessão que cobre a data (só acompanha quanto falta)
+function cicloParcelado(p,date){return(p.pacotes||[]).find(k=>k.tipo==='parcelado'&&date>=k.from&&date<=k.to)||null;}
+// Quanto já foi pago no ciclo de um pacote por sessão
+function progressoCiclo(p,k){
+  const ses=(p.sessions||[]).filter(s=>s.date>=k.from&&s.date<=k.to);
+  const pago=ses.filter(s=>s.paid&&!s.free).reduce((a,s)=>a+Number(s.paidAmount||0),0);
+  const nPagas=ses.filter(s=>s.paid&&!s.free).length;
+  const restantes=ses.filter(s=>!s.paid&&!s.free&&s.status!=='cancelada'&&s.status!=='faltou');
+  const falta=Math.max(0,Number(k.amount||0)-pago);
+  return{pago,nPagas,falta,restantes,completo:falta<0.005};
+}
 // Fim do período: véspera do mesmo dia no mês seguinte (14/10 → 13/11).
 // Se o dia não existe no mês seguinte (ex.: 31/01), vai até o último dia dele.
 function fimPacote(ini){const d=new Date(ini+'T12:00'),dia=d.getDate();d.setMonth(d.getMonth()+1);if(d.getDate()!==dia){d.setDate(0);return isoD(d);}d.setDate(d.getDate()-1);return isoD(d);}
@@ -1635,14 +1648,56 @@ function addPacote(pid){
   if(!date||!to||to<date){showToast('Confira as datas do pacote.','err');return;}
   const choque=(p.pacotes||[]).find(k=>date<=k.to&&to>=k.from);
   if(choque&&!confirm(`Já existe um pacote de ${fmtD(choque.from)} a ${fmtD(choque.to)} que se sobrepõe a este. Registrar mesmo assim?`))return;
-  const k={id:novoId(),date,from:date,to,amount,net,method:g('pk-met').value};
+  const par=document.querySelector('input[name=pk-tipo]:checked')?.value==='parcelado';
+  const k=par?{id:novoId(),date,from:date,to,amount,tipo:'parcelado'}:{id:novoId(),date,from:date,to,amount,net,method:g('pk-met').value};
   (p.pacotes=p.pacotes||[]).push(k);
   if(!p.packageValue&&amount)p.packageValue=amount;   // primeiro pacote vira o valor padrão
   // Agenda as sessões de TODO o ciclo (do dia do pagamento até a véspera da renovação)
   const criadas=g('pk-gerar')?.checked?gerarIntervalo(p,date,to):0;
   syncPacotes(p);save();updateNav();go('patient',pid,'combinados');
   const cob=(p.sessions||[]).filter(s=>s.pkg===k.id).length;
+  if(par){showToast(`Pacote por sessão de ${fmtD(date)} a ${fmtD(to)} (${fmt(amount)} no mês)${criadas?` · ${criadas} sessão(ões) agendada(s)`:''}. Marque cada sessão como paga quando ela pagar.`);return;}
   showToast(`Pacote de ${fmtD(date)} a ${fmtD(to)}: ${cob} sessão(ões) pagas${criadas?` (${criadas} agendada(s) agora)`:''}. Na conta: ${fmt(net)}.`);
+}
+// Faixa "pacote mensal pago por sessão" no topo da lista de sessões
+function cicloBanner(p){
+  const ks=(p.pacotes||[]).filter(k=>k.tipo==='parcelado'&&k.to>=diasAtras(10)).sort((a,b)=>a.from.localeCompare(b.from));
+  return ks.map(k=>{
+    const g=progressoCiclo(p,k),pct=Math.min(100,k.amount?g.pago/k.amount*100:0);
+    const resto=g.restantes.filter(s=>isBill(s)||s.status==='agendada').length;
+    return`<div class="card" style="margin-bottom:12px;border-color:${g.completo?'var(--gbd)':'#3a2a10'}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <span class="ml" style="margin-bottom:0;color:var(--gold)">📦 Pacote mensal · pago por sessão</span>
+        <span style="font-size:11px;color:var(--dim);font-family:var(--sans)">${fmtD(k.from)} a ${fmtD(k.to)} · renova ${fmtD(diaSeguinte(k.to)).slice(0,5)}</span></div>
+      <div style="font-size:14px;color:var(--cream);margin-bottom:6px">Pago <strong style="color:var(--green)">${fmt(g.pago)}</strong> de ${fmt(k.amount)} · ${g.nPagas} sessão(ões) paga(s) · ${g.completo?'<span style="color:var(--green)">✓ completo</span>':`faltam <strong style="color:var(--red)">${fmt(g.falta)}</strong>`}</div>
+      <div class="ptrack"><div class="pfill" style="width:${pct}%"></div></div>
+      ${g.completo&&resto?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:12px;font-family:var(--sans);color:#ccc">O valor do mês fechou. ${resto} sessão(ões) restante(s) no ciclo podem ficar sem custo.<button class="btn bp bs" onclick="restantesSemCusto(${p.id},${k.id})">Marcar restantes sem custo</button></div>`:''}
+    </div>`;
+  }).join('');
+}
+function restantesSemCusto(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  const l=progressoCiclo(p,k).restantes;if(!l.length)return;
+  if(!confirm(`Marcar ${l.length} sessão(ões) restante(s) do ciclo (${l.map(s=>fmtD(s.date).slice(0,5)).join(', ')}) como sem custo?`))return;
+  l.forEach(s=>{s.free=true;s.paid=false;s.paidAmount=0;s.paidNet=0;});save();updateNav();render();showToast('Sessões restantes marcadas como sem custo.');
+}
+// Converte um pacote "adiantado" em "pago por sessão" (ex.: registrado do jeito errado)
+function converterParcelado(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  // Sessões do ciclo que já passaram (agendadas ou realizadas) = as que ela já fez e pagou
+  const ja=(p.sessions||[]).filter(s=>s.pkg===kid&&s.date<=td()&&s.status!=='cancelada'&&s.status!=='faltou');
+  if(!confirm(`Transformar este pacote em "pago por sessão"?\n\nO valor de ${fmt(k.amount)} deixa de contar como recebido de uma vez.${ja.length?`\nAs sessões do ciclo que já passaram (${ja.map(s=>fmtD(s.date).slice(0,5)).join(', ')}) ficam como REALIZADAS e PAGAS, cada uma pelo valor da sessão (${fmt(p.sessionValue)}). Se alguma não foi paga, desmarque depois.`:''}\nAs próximas você marca como pagas conforme ela pagar.`))return;
+  ja.forEach(s=>{if(s.status==='agendada')s.status='realizada';s.pkg=null;s.paid=true;s.paidAmount=sv(p,s);s.paidDate=s.date;s.payMethod=k.method||'';s.paidNet=liquidoDe(s.paidAmount,s.payMethod);s.pkgOut=false;});
+  k.tipo='parcelado';delete k.net;
+  syncPacotes(p);save();updateNav();go('patient',pid,'combinados');showToast('Pacote agora é pago por sessão.');
+}
+function pkTipo(){
+  const par=document.querySelector('input[name=pk-tipo]:checked')?.value==='parcelado',g=id=>document.getElementById(id);
+  ['pk-net-w','pk-met-w'].forEach(id=>{const e=g(id);if(e)e.style.display=par?'none':'';});
+  const lv=g('pk-val-l');if(lv)lv.textContent=par?'Valor mensal combinado (R$)':'Valor do pacote (R$)';
+  const ld=g('pk-date-l');if(ld)ld.textContent=par?'Início do ciclo':'Pago em (início do ciclo)';
+  const ex=g('pk-par-info');if(ex)ex.style.display=par?'':'none';
+  const b=g('pk-btn');if(b)b.textContent=par?'Registrar pacote por sessão':'Registrar pacote';
 }
 // Agenda (ou completa) as sessões de um pacote já registrado
 function agendarPacote(pid,kid){
@@ -1707,7 +1762,7 @@ function rCombinados(p){
       <label style="display:flex;align-items:center;gap:8px;width:110px;cursor:pointer"><input type="checkbox" ${sch[d]?'checked':''} onchange="setSched(${p.id},${d},this.checked?(document.getElementById('sch-${d}').value||'10:00'):'')">${DIAS[d]}</label>
       <input type="time" class="inp" id="sch-${d}" style="width:110px;padding:4px 8px;font-size:12px" value="${sch[d]||''}" onchange="if(this.value)setSched(${p.id},${d},this.value)"></div>`).join('');
   const pks=(p.pacotes||[]).slice().sort((a,b)=>b.from.localeCompare(a.from));
-  const ativo=pacoteCobrindo(p,td());
+  const ativo=pacoteCobrindo(p,td())||cicloParcelado(p,td());
   const pacoteCard=`<div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="ml" style="margin-bottom:0">📦 Pagamento antecipado (pacote)</span>
       ${ativo?`<span style="font-size:12px;color:var(--green);font-family:var(--sans)">Ciclo atual: ${fmtD(ativo.from)} a ${fmtD(ativo.to)} · renova em ${fmtD(diaSeguinte(ativo.to))}</span>`:''}</div>
@@ -1717,19 +1772,27 @@ function rCombinados(p){
       <input type="number" min="0" step="0.01" class="inp" style="width:110px;padding:5px 8px" value="${p.packageValue||''}" placeholder="ex.: 400" onchange="updPat(${p.id},'packageValue',parseFloat(this.value)||0);const v=document.getElementById('pk-val');if(v&&!v.dataset.manual){v.value=(parseFloat(this.value)||0).toFixed(2);pkSugerir(${p.id})}">
       <span style="color:var(--dim);font-size:11px">(fica salvo. Serve para o pacote antecipado e, para quem paga por sessão, para avisar quando o mês já fechou e a próxima sessão é sem custo)</span>
     </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--sans);font-size:12px;color:#ccc">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="pk-tipo" value="antecipado" checked onchange="pkTipo()"> Pagou o mês todo adiantado</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="pk-tipo" value="parcelado" onchange="pkTipo()"> Paga por sessão até completar o valor do mês</label>
+    </div>
+    <div id="pk-par-info" style="display:none;font-size:11px;color:var(--gold);font-family:var(--sans);line-height:1.6;margin-bottom:10px">Nada entra de uma vez: cada sessão é marcada como paga quando ela pagar. O app mostra quanto já foi pago e quanto falta, e quando completar o valor, as sessões restantes do ciclo podem ficar sem custo.</div>
     <div class="g3 fg" style="gap:10px;align-items:end">
-      <div class="fi"><label>Pago em (início do ciclo)</label><input type="date" class="inp" id="pk-date" value="${td()}" onchange="pkSugerir(${p.id})"></div>
+      <div class="fi"><label id="pk-date-l">Pago em (início do ciclo)</label><input type="date" class="inp" id="pk-date" value="${td()}" onchange="pkSugerir(${p.id})"></div>
       <div class="fi"><label>Último dia do ciclo</label><input type="date" class="inp" id="pk-to" value="${fimPacote(td())}" onchange="this.dataset.manual='1';pkSugerir(${p.id})"></div>
-      <div class="fi"><label>Forma</label><select class="sel" id="pk-met" onchange="pkSugerir(${p.id})">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select></div>
-      <div class="fi"><label>Valor do pacote (R$)</label><input type="number" min="0" step="0.01" class="inp" id="pk-val" oninput="this.dataset.manual='1';pkSugerir(${p.id})"></div>
-      <div class="fi"><label>Caiu na conta (R$, sem taxas)</label><input type="number" min="0" step="0.01" class="inp" id="pk-net" oninput="this.dataset.manual='1';pkSugerir(${p.id},'net')"></div>
+      <div class="fi" id="pk-met-w"><label>Forma</label><select class="sel" id="pk-met" onchange="pkSugerir(${p.id})">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="fi"><label id="pk-val-l">Valor do pacote (R$)</label><input type="number" min="0" step="0.01" class="inp" id="pk-val" oninput="this.dataset.manual='1';pkSugerir(${p.id})"></div>
+      <div class="fi" id="pk-net-w"><label>Caiu na conta (R$, sem taxas)</label><input type="number" min="0" step="0.01" class="inp" id="pk-net" oninput="this.dataset.manual='1';pkSugerir(${p.id},'net')"></div>
     </div>
     <div id="pk-info" style="font-size:11px;color:var(--gold);font-family:var(--sans);margin:-4px 0 8px"></div>
     ${p.schedule&&Object.keys(p.schedule).length?`<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;font-family:var(--sans);margin-bottom:10px"><input type="checkbox" id="pk-gerar" checked> Já agendar as sessões do período pelo horário fixo (${esc(horariosTxt(p))})</label>`:`<div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-bottom:10px">Dica: defina o horário fixo abaixo para o app já agendar as sessões do pacote.</div>`}
-    <button class="btn bp bs" onclick="addPacote(${p.id})">Registrar pacote</button>
-    ${pks.length?`<div class="divl"></div>${pks.map(k=>{const n=(p.sessions||[]).filter(s=>s.pkg===k.id).length;return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
+    <button class="btn bp bs" id="pk-btn" onclick="addPacote(${p.id})">Registrar pacote</button>
+    ${pks.length?`<div class="divl"></div>${pks.map(k=>{const n=(p.sessions||[]).filter(s=>s.pkg===k.id).length;
+      if(k.tipo==='parcelado'){const gp2=progressoCiclo(p,k);return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
+      <span style="color:${k===ativo?'var(--green)':'#bbb'};line-height:1.6">${fmtD(k.from)} a ${fmtD(k.to)} · por sessão · pago ${fmt(gp2.pago)} de ${fmt(k.amount)} · ${gp2.completo?'✓ completo':'faltam '+fmt(gp2.falta)}</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
       <span style="color:${k===ativo?'var(--green)':'#bbb'};line-height:1.6">${fmtD(k.from)} a ${fmtD(k.to)} · ${fmt(k.amount)}${Math.abs(netK(k)-k.amount)>0.004?` · <span style="cursor:pointer;text-decoration:underline dotted" title="Corrigir o valor que entrou na conta" onclick="editLiqPacote(${p.id},${k.id})">na conta ${fmt(netK(k))}</span>`:` · <span style="cursor:pointer;color:var(--dim);text-decoration:underline dotted" onclick="editLiqPacote(${p.id},${k.id})">informar taxa</span>`}${k.method?' · '+esc(k.method):''} · ${n} sessão(ões)</span>
-      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
+      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn bg bs" title="Ela paga por sessão (não pagou tudo adiantado)" onclick="converterParcelado(${p.id},${k.id})">É por sessão?</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
   </div>`;
   setTimeout(()=>pkSugerir(p.id),0);
   return`${pacoteCard}<div class="g2">
@@ -1840,7 +1903,7 @@ function recebimentos(){
   const r=[];
   patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&!s.pkg&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),liquido:netS(s),p,s})));
   // Pacotes entram pelo valor realmente recebido, na data do pagamento
-  patients.forEach(p=>(p.pacotes||[]).filter(k=>Number(k.amount)>0).forEach(k=>r.push({data:k.date,valor:Number(k.amount),liquido:netK(k),p,s:{date:k.from,payMethod:k.method},pacote:k})));
+  patients.forEach(p=>(p.pacotes||[]).filter(k=>k.tipo!=='parcelado'&&Number(k.amount)>0).forEach(k=>r.push({data:k.date,valor:Number(k.amount),liquido:netK(k),p,s:{date:k.from,payMethod:k.method},pacote:k})));
   return r.sort((a,b)=>a.data.localeCompare(b.data));
 }
 function rCaixa(c){
