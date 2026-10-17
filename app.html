@@ -786,6 +786,7 @@ function rPatient(c,pt,ps,ta){
             <span class="bdg" style="background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>${s.repoDe?`<span class="tag" style="background:#1a1508;border:1px solid #3a2a10;color:var(--gold);font-size:10px" title="Sessão remarcada">↻ remarcada de ${fmtD(s.repoDe).slice(0,5)}</span>`:''}
             <select class="sel" style="width:auto;padding:3px 8px;font-size:10px" onchange="updSessStatus(${p.id},${s.id},this.value)">${Object.entries(ST).map(([k,v])=>`<option value="${k}"${s.status===k?' selected':''}>${v.label}</option>`).join('')}</select>
             <button class="btn bg bs" title="Remarcar para outra data (reposição)" onclick="remarcarSessao(${p.id},${s.id})">↻ Remarcar</button>
+            <button class="btn brd bs" title="Excluir esta sessão" onclick="excluirSessao(${p.id},${s.id})">🗑 Excluir</button>
             ${s.status==='agendada'?`<button class="btn bgo bs" onclick="openSchedModal(${p.id},${s.id})">Agendar/Notificar</button>`:''}
           </div>
           <div class="g2" style="gap:8px;margin-bottom:7px">
@@ -808,7 +809,7 @@ function rPatient(c,pt,ps,ta){
       </div></div>`;
     }).join('');
 
-    body=`${cicloBanner(p)}<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><span class="ml" style="margin-bottom:0">Histórico de Sessões (${(p.sessions||[]).length})</span><button class="btn bp bs" onclick="go('new-session',${p.id})">+ Nova Sessão</button></div>${(p.sessions||[]).length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhuma sessão registrada.</div>':sessHtml}</div>`;
+    body=`${cicloBanner(p)}<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px"><span class="ml" style="margin-bottom:0">Histórico de Sessões (${(p.sessions||[]).length})</span><span style="display:flex;gap:6px;flex-wrap:wrap">${sessoesLimpaveis(p).length?`<button class="btn brd bs" title="Apaga as agendadas/canceladas sem anotação, para refazer" onclick="limparAgendadas(${p.id})">🗑 Limpar agendadas (${sessoesLimpaveis(p).length})</button>`:''}<button class="btn bp bs" onclick="go('new-session',${p.id})">+ Nova Sessão</button></span></div>${(p.sessions||[]).length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhuma sessão registrada.</div>':sessHtml}</div>`;
   }
 
   else if(patTab==='timeline'){
@@ -1631,6 +1632,23 @@ function editInclui(pid,kid){
   const v=prompt('Quantas sessões este pacote cobre? (as que passarem disso aparecem como 🎁 sessão extra, sem custo)',String(incluiDe(k)));if(v===null)return;
   const n=parseInt(v,10);if(!(n>0))return;k.inclui=n;save();go('patient',pid,'combinados');
 }
+// Excluir uma sessão (ex.: agendada por engano). Avisa se já tem anotação ou pagamento.
+function excluirSessao(pid,sid){
+  const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;
+  const avisos=[];if(s.notes&&s.notes.trim())avisos.push('ela TEM ANOTAÇÃO CLÍNICA, que será apagada');if(s.paid&&!s.pkg)avisos.push('ela está marcada como PAGA (o valor sai do financeiro)');
+  if(!confirm(`Excluir a sessão de ${fmtD(s.date)} às ${s.time||'--'}?${avisos.length?'\n\nAtenção: '+avisos.join(' e ')+'.':''}\n\nIsso não pode ser desfeito.`))return;
+  p.sessions=p.sessions.filter(x=>x.id!==sid);syncPacotes(p);save();updateNav();go('patient',pid,'sessoes');showToast('Sessão excluída.');
+}
+// Apaga em lote as sessões ainda não usadas (agendadas ou canceladas, sem anotação e sem pagamento avulso)
+function sessoesLimpaveis(p,filtro){return(p.sessions||[]).filter(s=>(s.status==='agendada'||s.status==='cancelada')&&!(s.notes&&s.notes.trim())&&!(s.paid&&!s.pkg)&&(!filtro||filtro(s)));}
+function limparAgendadas(pid,kid){
+  const p=gp(pid);if(!p)return;
+  const l=sessoesLimpaveis(p,kid?s=>s.pkg===kid||s.pkgKeep===kid:null);
+  if(!l.length){showToast('Nenhuma sessão agendada sem anotação para apagar.','err');return;}
+  if(!confirm(`Apagar ${l.length} sessão(ões) agendada(s)/cancelada(s) sem anotação?\n\n${l.map(s=>fmtD(s.date)).join(', ')}\n\nSessões realizadas, com anotação ou pagas à parte NÃO são apagadas.`))return;
+  const ids=new Set(l.map(s=>s.id));p.sessions=p.sessions.filter(s=>!ids.has(s.id));
+  syncPacotes(p);save();updateNav();render();showToast(`${l.length} sessão(ões) apagada(s). Agora é só gerar de novo.`);
+}
 // Remarcar (reposição): muda a data e o horário; se era do pacote, continua paga dentro dele
 function remarcarSessao(pid,sid){
   const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;
@@ -1831,7 +1849,7 @@ function rCombinados(p){
       <span style="color:${k===ativo?'var(--green)':'#bbb'};line-height:1.6">${fmtD(k.from)} a ${fmtD(k.to)} · por sessão · pago ${fmt(gp2.pago)} de ${fmt(k.amount)} · ${gp2.completo?'✓ completo':'faltam '+fmt(gp2.falta)}</span>
       <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
       <span style="color:${k===ativo?'var(--green)':'#bbb'};line-height:1.6">${fmtD(k.from)} a ${fmtD(k.to)} · ${fmt(k.amount)}${Math.abs(netK(k)-k.amount)>0.004?` · <span style="cursor:pointer;text-decoration:underline dotted" title="Corrigir o valor que entrou na conta" onclick="editLiqPacote(${p.id},${k.id})">na conta ${fmt(netK(k))}</span>`:` · <span style="cursor:pointer;color:var(--dim);text-decoration:underline dotted" onclick="editLiqPacote(${p.id},${k.id})">informar taxa</span>`}${k.method?' · '+esc(k.method):''} · <span style="cursor:pointer;text-decoration:underline dotted" title="Mudar quantas sessões o pacote cobre" onclick="editInclui(${p.id},${k.id})">${n} sessão(ões): ${Math.min(n,incluiDe(k))} incluída(s)${n>incluiDe(k)?` + ${n-incluiDe(k)} 🎁 extra`:''}</span></span>
-      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn bg bs" title="Ela paga por sessão (não pagou tudo adiantado)" onclick="converterParcelado(${p.id},${k.id})">É por sessão?</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
+      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn brd bs" title="Apaga as sessões agendadas deste pacote (sem anotação)" onclick="limparAgendadas(${p.id},${k.id})">🗑 Sessões</button><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn bg bs" title="Ela paga por sessão (não pagou tudo adiantado)" onclick="converterParcelado(${p.id},${k.id})">É por sessão?</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
   </div>`;
   setTimeout(()=>pkSugerir(p.id),0);
   return`${pacoteCard}<div class="g2">
