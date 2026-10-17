@@ -15,7 +15,7 @@ Guia para colocar o app no **seu próprio domínio**, com **sua senha** e **seus
 - **Prontuário:** ficha do paciente, anamnese, plano terapêutico e anotações de cada sessão (salvas enquanto você digita).
 - **Agenda:** sessões agendadas, mensagem pronta de confirmação pelo WhatsApp, link do Meet.
 - **Financeiro:** pago ou pendente, falta cobrada, lista de quem está em aberto, cobrança pelo WhatsApp com sua chave Pix.
-- **Recibo** pronto para imprimir ou PDF, com CPF e valor por extenso (vale para o Imposto de Renda do paciente).
+- **Recibo** pronto para imprimir ou PDF, com CPF e valor por extenso (comprovante de pagamento e para reembolso; sem CRP, não é dedutível no Imposto de Renda).
 - **Celular e computador sincronizados**, com backup automático todo dia.
 - **Google Agenda** (opcional): as sessões aparecem sozinhas na sua agenda, com lembretes no celular.
 

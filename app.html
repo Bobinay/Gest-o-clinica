@@ -182,7 +182,9 @@ button{cursor:pointer}
       <div class="ni" data-v="agenda" onclick="go('agenda')"><span style="font-size:13px">◷</span>Agenda</div>
       <div class="ni" data-v="waitlist" onclick="go('waitlist')"><span style="font-size:13px">◌</span>Lista de Espera</div>
       <div class="ni" data-v="financial" onclick="go('financial')"><span style="font-size:13px">◉</span>Financeiro</div>
+      <div class="ni" data-v="caixa" onclick="go('caixa')"><span style="font-size:13px">▤</span>Livro-caixa</div>
       <div class="ni" data-v="indicators" onclick="go('indicators')"><span style="font-size:13px">◫</span>Indicadores</div>
+      <div class="ni" data-v="formacao" onclick="go('formacao')"><span style="font-size:13px">❖</span>Formação</div>
       <div class="ni" data-v="new-patient" onclick="go('new-patient')"><span style="font-size:13px">✦</span>Novo Paciente</div>
       <div class="ni" data-v="settings" onclick="go('settings')"><span style="font-size:13px">⚙</span>Configurações</div>
       <div class="ni" onclick="exportJSON()"><span style="font-size:13px">↓</span>Baixar Backup</div>
@@ -255,11 +257,18 @@ button{cursor:pointer}
 <!-- MODAL: Confirmar delete -->
 <div class="mbg" id="modal-del">
   <div class="mbox" style="max-width:340px">
-    <div style="font-size:17px;color:var(--red);margin-bottom:9px">Remover Paciente</div>
-    <div style="font-size:13px;color:var(--dim);font-family:var(--sans);line-height:1.75;margin-bottom:18px">Tem certeza? Todo o histórico será excluído permanentemente.</div>
-    <div style="display:flex;gap:9px">
-      <button class="btn brd" id="del-btn">Remover</button>
+    <div style="font-size:17px;color:var(--gold);margin-bottom:9px">Encerrar acompanhamento</div>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.75;margin-bottom:12px">
+      <strong style="color:var(--cream)">Dar alta</strong> tira o paciente da lista, mas <strong style="color:var(--cream)">guarda o prontuário</strong> (recomendado: guarde por muitos anos). Dá para retomar depois.
+    </div>
+    <input type="text" class="inp" id="alta-motivo" placeholder="Motivo (opcional): alta, interrupção, mudança…" style="margin-bottom:12px">
+    <div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn bp" id="alta-btn">Dar alta (arquivar)</button>
       <button class="btn bg" onclick="closeModal('modal-del')">Cancelar</button>
+    </div>
+    <div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:12px">
+      <button class="btn brd bs" id="del-btn">Excluir definitivamente</button>
+      <div style="font-size:10px;color:var(--dim);font-family:var(--sans);margin-top:6px">Apaga todo o histórico. Não pode ser desfeito.</div>
     </div>
   </div>
 </div>
@@ -285,7 +294,7 @@ const ORIENTATIONS=['Psicanalítica','Lacaniana','Freudiana','Junguiana','Winnic
 const MOODS=['Estável','Ansioso','Deprimido','Agitado','Resistente','Elaborativo','Em crise','Indiferente'];
 
 // ── STATE ────────────────────────────────────────────────────
-let patients=[], waitlist=[], view='dashboard', apid=null, patTab='dados';
+let patients=[], waitlist=[], despesas=[], formacao=[], view='dashboard', apid=null, patTab='dados';
 let dashFilter='semana',dashFrom='',dashTo='';
 let finFilter='mes',finFrom='',finTo='';
 
@@ -302,6 +311,7 @@ function setSync(state,txt){const el=document.getElementById('sync');if(!el)retu
 
 function applyData(d){
   patients=(d&&d.patients)||[];waitlist=(d&&d.waitlist)||[];
+  despesas=(d&&d.despesas)||[];formacao=(d&&d.formacao)||[];
   if(d&&d.settings)settings={...settings,...d.settings};
 }
 
@@ -330,7 +340,7 @@ async function flush(){
   if(!dirty)return;
   saving=true;dirty=false;
   try{
-    const r=await fetch('api.php',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},body:JSON.stringify({rev,data:{patients,waitlist,settings}})});
+    const r=await fetch('api.php',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF},body:JSON.stringify({rev,data:{patients,waitlist,settings,despesas,formacao}})});
     if(r.status===401){dirty=true;setSync('err','Sessão expirou');alert('Sua sessão expirou. Faça login de novo.\n\n(A última alteração pode não ter sido salva — confira depois de entrar.)');location.href='index.php';return;}
     if(r.status===409){
       const j=await r.json();
@@ -491,13 +501,15 @@ function updateNav(){
   document.querySelectorAll('.ni[data-v]').forEach(el=>el.classList.toggle('on',el.dataset.v===view&&!apid));
   const np=document.getElementById('nav-pats');
   if(!patients.length){np.innerHTML='';return;}
-  const bdays=patients.filter(p=>{const d=daysUntilBirthday(p.birthDate);return d!==null&&d<=7;});
-  np.innerHTML='<div class="sb-sec">Pacientes</div>'+patients.map(p=>{
+  const arq=patients.length-ativos().length;
+  np.innerHTML='<div class="sb-sec">Pacientes</div>'+ativos().map(p=>{
     const hasPend=bal(p).pending>0;
     const hasBday=daysUntilBirthday(p.birthDate)<=7&&p.birthDate;
     return`<div class="ni${apid===p.id?' on':''}" onclick="go('patient',${p.id})"><span class="ndot" style="background:${p.color}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:0;font-size:12px">${esc(p.name.split(' ')[0])} ${p.name.split(' ')[1]?.[0]||''}.</span>${hasBday?'<span style="margin-left:auto;font-size:10px">🎂</span>':''}${hasPend&&!hasBday?'<span class="nbadge"></span>':''}</div>`;
-  }).join('');
+  }).join('')+(arq?`<div class="ni${view==='archived'?' on':''}" onclick="go('archived')" style="opacity:.7"><span style="font-size:12px">⌂</span><span style="font-size:11px">Arquivados (${arq})</span></div>`:'');
 }
+// Pacientes em acompanhamento (sem alta)
+function ativos(){return patients.filter(p=>!p.archived);}
 
 // ── NAVIGATION ───────────────────────────────────────────────
 function go(v,pid=null,tab=null){
@@ -521,6 +533,9 @@ function render(){
   else if(view==='indicators'){pt.textContent='Indicadores da Prática';rIndicators(cnt);}
   else if(view==='new-patient'){pt.textContent='Novo Paciente';rNewPat(cnt);}
   else if(view==='settings'){pt.textContent='Configurações';rSettings(cnt);bioList();}
+  else if(view==='caixa'){pt.textContent='Livro-caixa';ps.textContent='Receitas, despesas e carnê-leão';rCaixa(cnt);}
+  else if(view==='formacao'){pt.textContent='Formação';ps.textContent='Análise pessoal, supervisão e estudos';rFormacao(cnt);}
+  else if(view==='archived'){pt.textContent='Pacientes arquivados';ps.textContent='Acompanhamentos encerrados (prontuário guardado)';rArchived(cnt);}
   else if(view==='new-session'&&apid){pt.textContent='Nova Sessão';ps.textContent=gp(apid)?.name||'';rNewSess(cnt);}
 
   cnt.classList.add('fade');setTimeout(()=>cnt.classList.remove('fade'),280);
@@ -550,21 +565,22 @@ function rDash(c){
   const customInputs=dashFilter==='custom'?`<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap"><input type="date" class="inp" style="width:auto;font-size:11px;padding:6px 10px" value="${dashFrom}" onchange="dashFrom=this.value;rDash(document.getElementById('cnt'))"><span style="color:var(--dim);font-size:12px;font-family:var(--sans)">até</span><input type="date" class="inp" style="width:auto;font-size:11px;padding:6px 10px" value="${dashTo}" onchange="dashTo=this.value;rDash(document.getElementById('cnt'))"></div>`:'';
 
   // Birthday alerts
-  const bdays=patients.filter(p=>p.birthDate&&daysUntilBirthday(p.birthDate)<=7);
+  const bdays=ativos().filter(p=>p.birthDate&&daysUntilBirthday(p.birthDate)<=7);
   const bdayHtml=bdays.length?`<div style="background:#1a1005;border:1px solid #3a2a10;border-radius:8px;padding:12px;margin-bottom:14px">
     <span class="ml" style="color:var(--gold);margin-bottom:7px">🎂 Aniversários próximos (7 dias)</span>
     ${bdays.map(p=>{const d=daysUntilBirthday(p.birthDate);return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-family:var(--sans);font-size:12px"><span style="color:var(--cream);cursor:pointer" onclick="go('patient',${p.id})">${esc(p.name)}</span><span style="color:var(--gold)">${d===0?'Hoje!':d===1?'Amanhã':`Em ${d} dias`}</span></div>`;}).join('')}
   </div>`:'';
 
   c.innerHTML=`
+  ${lembretesHtml()}
   ${bdayHtml}
   <div class="g4" style="margin-bottom:14px">
-    ${[['Pacientes',patients.length,'var(--gold)'],['Espera',waitlist.length,'var(--blue)'],['Recebido',fmt(fin.tP),'var(--green)'],['Pendente',fmt(fin.tPend),fin.tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
+    ${[['Pacientes',ativos().length,'var(--gold)'],['Espera',waitlist.length,'var(--blue)'],['Recebido',fmt(fin.tP),'var(--green)'],['Pendente',fmt(fin.tPend),fin.tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
   </div>
   <div class="g2">
     <div class="card">
       <span class="ml">Pacientes</span>
-      ${patients.length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhum paciente ainda.</div>':patients.map(p=>{
+      ${ativos().length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhum paciente ainda.</div>':ativos().map(p=>{
         const b=bal(p),rate=attendanceRate(p);
         return`<div class="pc" style="border-left-color:${p.color}" onclick="go('patient',${p.id})">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
@@ -602,9 +618,9 @@ function rPatient(c,pt,ps,ta){
   const b=bal(p);
   pt.textContent=p.name;
   ps.textContent=`${p.frequency} · ${fmt(p.sessionValue)}/sessão · ${b.count} sessões`;
-  ta.innerHTML=`<button class="btn bg bs hm" onclick="exportPDF(${p.id})">↓ PDF</button><button class="btn bp bs" onclick="go('new-session',${p.id})">+ Sessão</button><button class="btn brd bs" onclick="confirmDel(${p.id})">✕</button>`;
+  ta.innerHTML=`<button class="btn bg bs hm" onclick="exportPDF(${p.id})">↓ PDF</button><button class="btn bp bs" onclick="go('new-session',${p.id})">+ Sessão</button><button class="btn brd bs" onclick="confirmDel(${p.id})">Encerrar</button>`;
 
-  const tabs=[['dados','Dados'],['anamnese','Anamnese'],['plano','Plano'],['sessoes','Sessões'],['timeline','Linha do Tempo']];
+  const tabs=[['dados','Dados'],['anamnese','Anamnese'],['plano','Plano'],['sessoes','Sessões'],['timeline','Linha do Tempo'],['combinados','Combinados']];
   const tabsHtml=`<div class="tabs">${tabs.map(([k,l])=>`<div class="tab${patTab===k?' on':''}" onclick="patTab='${k}';rPatient(document.getElementById('cnt'),document.getElementById('ptitle'),document.getElementById('psub'),document.getElementById('tact'))">${l}</div>`).join('')}</div>`;
 
   let body='';
@@ -756,6 +772,7 @@ function rPatient(c,pt,ps,ta){
             </div>
           </div>
           <textarea class="efta" style="min-height:50px;font-size:12px" placeholder="Anotações clínicas da sessão…" onchange="updSessField(${p.id},${s.id},'notes',this.value)">${esc(s.notes)}</textarea>
+          <label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;font-family:var(--sans);color:${s.supervisao?'var(--purple)':'var(--dim)'};cursor:pointer"><input type="checkbox" ${s.supervisao?'checked':''} onchange="updSessField(${p.id},${s.id},'supervisao',this.checked);this.parentElement.style.color=this.checked?'var(--purple)':'var(--dim)'"> Levar à supervisão</label>
         </div>
         <div class="spp">${pay}</div>
       </div></div>`;
@@ -790,13 +807,26 @@ function rPatient(c,pt,ps,ta){
     </div>`;
   }
 
-  c.innerHTML=tabsHtml+body;
+  else if(patTab==='combinados'){body=rCombinados(p);}
+
+  const altaHtml=p.archived?`<div style="background:#16161a;border:1px solid var(--bd3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-family:var(--sans);font-size:12px;color:#aaa;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>⌂ Acompanhamento encerrado em ${fmtD(p.archivedDate)}${p.archiveReason?' · '+esc(p.archiveReason):''}. O prontuário fica guardado.</span><button class="btn bg bs" onclick="reativarPac(${p.id})">Retomar acompanhamento</button></div>`:'';
+  c.innerHTML=altaHtml+tabsHtml+body;
 }
 
 // ── AGENDA ───────────────────────────────────────────────────
 function rAgenda(c){
   const up=upcoming();
-  c.innerHTML=`<div class="card"><span class="ml" style="display:block;margin-bottom:13px">Próximas Sessões Agendadas</span>
+  const comHorario=ativos().filter(p=>p.schedule&&Object.keys(p.schedule).length);
+  const prox=new Date();prox.setMonth(prox.getMonth()+1);
+  const mesAtual=td().slice(0,7),mesProx=isoD(prox).slice(0,7);
+  const nomeMes=m=>new Date(m+'-15T12:00').toLocaleDateString('pt-BR',{month:'long'});
+  c.innerHTML=`<div class="card" style="margin-bottom:14px">
+    <span class="ml" style="margin-bottom:8px">Gerar sessões pelos horários fixos</span>
+    ${comHorario.length?`<div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:10px">${comHorario.length} paciente(s) com horário fixo. Cria as sessões que faltam (não duplica).</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bp bs" onclick="gerarSessoes(ativos().map(p=>p.id),'${mesAtual}')">Gerar ${nomeMes(mesAtual)}</button><button class="btn bg bs" onclick="gerarSessoes(ativos().map(p=>p.id),'${mesProx}')">Gerar ${nomeMes(mesProx)}</button></div>`
+    :`<div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7">Defina o horário fixo de cada paciente em <em>Paciente → Combinados</em> e as sessões do mês são criadas com um toque.</div>`}
+  </div>
+  <div class="card"><span class="ml" style="display:block;margin-bottom:13px">Próximas Sessões Agendadas</span>
   ${up.length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhuma sessão agendada.</div>':
   up.map(s=>`<div style="display:flex;gap:13px;align-items:center;padding:10px 0;border-bottom:1px solid var(--bd)">
     <div style="min-width:76px;flex-shrink:0"><div style="font-size:13px;color:var(--gold)">${fmtD(s.date)}</div><div style="font-size:11px;color:var(--dim);font-family:var(--sans)">${s.time}</div></div>
@@ -1150,8 +1180,29 @@ function chargeWA(pid){
   if(isMobile()&&navigator.clipboard)navigator.clipboard.writeText(msg).catch(()=>{});
   window.open(waLink(p.phone,msg),'_blank');
 }
-function confirmDel(id){document.getElementById('del-btn').onclick=()=>delPat(id);openModal('modal-del');}
-function delPat(id){patients=patients.filter(p=>p.id!==id);save();closeModal('modal-del');showToast('Paciente removido.','err');updateNav();go('dashboard');}
+function confirmDel(id){
+  document.getElementById('alta-motivo').value='';
+  document.getElementById('alta-btn').onclick=()=>altaPac(id,document.getElementById('alta-motivo').value.trim());
+  document.getElementById('del-btn').onclick=()=>{const p=gp(id);if(p&&confirm(`Excluir DEFINITIVAMENTE ${p.name} e todo o histórico de sessões e anotações?\n\nIsso não pode ser desfeito.`))delPat(id);};
+  openModal('modal-del');
+}
+function delPat(id){patients=patients.filter(p=>p.id!==id);save();closeModal('modal-del');showToast('Paciente excluído.','err');updateNav();go('dashboard');}
+function altaPac(id,motivo){
+  const p=gp(id);if(!p)return;
+  p.archived=true;p.archivedDate=td();p.archiveReason=motivo||'';
+  // sessões futuras agendadas deixam de existir na agenda
+  const fut=(p.sessions||[]).filter(s=>s.status==='agendada'&&s.date>td());
+  fut.forEach(s=>s.status='cancelada');
+  save();closeModal('modal-del');updateNav();go('patient',id,patTab);
+  showToast(`Alta registrada.${fut.length?` ${fut.length} sessão(ões) futura(s) cancelada(s).`:''}`);
+}
+function reativarPac(id){const p=gp(id);if(!p)return;p.archived=false;save();updateNav();go('patient',id,patTab);showToast('Acompanhamento retomado.');}
+function rArchived(c){
+  const arq=patients.filter(p=>p.archived).sort((a,b)=>(b.archivedDate||'').localeCompare(a.archivedDate||''));
+  c.innerHTML=`<div class="card" style="max-width:640px"><span class="ml" style="margin-bottom:12px">Arquivados (${arq.length})</span>
+  ${arq.length?arq.map(p=>`<div class="pc" style="border-left-color:${p.color}" onclick="go('patient',${p.id})"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="font-size:14px;color:var(--cream)">${esc(p.name)}</span><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">Alta em ${fmtD(p.archivedDate)}${p.archiveReason?' · '+esc(p.archiveReason):''}</span></div></div>`).join(''):'<div style="color:var(--dim);font-size:12px;font-family:var(--sans)">Nenhum paciente arquivado.</div>'}
+  </div>`;
+}
 
 // ── PDF ───────────────────────────────────────────────────────
 function exportPDF(id){
@@ -1190,7 +1241,7 @@ function receipt(pid,from,to){
   const list=(p.sessions||[]).filter(s=>isBill(s)&&s.paid&&s.date>=from&&s.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
   if(!list.length){showToast('Nenhuma sessão paga neste período.','err');return;}
   const total=list.reduce((a,s)=>a+Number(s.paidAmount||sv(p,s)),0);
-  if(!settings.cpf||!p.cpf)showToast('Dica: preencha seu CPF (Configurações) e o do paciente para o recibo valer no IR.');
+  if(!settings.cpf||!p.cpf)showToast('Dica: preencha seu CPF (Configurações) e o do paciente para o recibo ficar completo.');
   const today=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo – ${esc(p.name)}</title><style>
   body{font-family:Georgia,serif;max-width:720px;margin:0 auto;padding:48px 40px;color:#111;line-height:1.7}
@@ -1208,7 +1259,7 @@ function receipt(pid,from,to){
   </tbody></table>
   <p>Para clareza, firmo o presente.</p>
   <p style="text-align:right">${esc(settings.city||'')}${settings.city?', ':''}${today}.</p>
-  <div class="sig"><div class="ln"></div>${esc(settings.name)}<br><span class="small">${esc(settings.title)}${settings.cpf?` · CPF ${esc(settings.cpf)}`:''}${settings.address?`<br>${esc(settings.address)}`:''}</span></div>
+  <div class="sig"><div class="ln"></div>${esc(settings.name)}<br><span class="small">${esc(settings.title)}${settings.regProf?` · ${esc(settings.regProf)}`:''}${settings.cpf?` · CPF ${esc(settings.cpf)}`:''}${settings.address?`<br>${esc(settings.address)}`:''}</span></div>
   </body></html>`;
   const w=window.open('','_blank');if(!w){showToast('Permita pop-ups para gerar o recibo.','err');return;}
   w.document.write(html);w.document.close();setTimeout(()=>w.print(),300);
@@ -1227,10 +1278,24 @@ function rSettings(c){
       ${f('city','Cidade','Cidade - UF')}
     </div>
     ${f('address','Endereço do consultório (opcional)')}
+    ${f('regProf','Registro profissional (opcional — só se tiver CRP/CRM)','Ex.: CRP 04/12345')}
+    <div style="font-size:11px;color:var(--dim);font-family:var(--sans);line-height:1.7;margin:-4px 0 4px">
+      Sem CRP/CRM, o recibo serve como comprovante de pagamento e para reembolso de plano ou empresa,
+      mas <strong style="color:#bbb">não é dedutível no Imposto de Renda</strong> do paciente. Seus recebimentos entram no carnê-leão (veja Livro-caixa).
+    </div>
     <div class="g2 fg" style="gap:13px">
       ${f('pixKey','Chave Pix (vai na mensagem de cobrança)')}
       <div class="fi"><label>Forma de pagamento padrão</label><select class="sel" onchange="updSetting('defaultPay',this.value)"><option value="">—</option>${PAYS.map(m=>`<option${settings.defaultPay===m?' selected':''}>${m}</option>`).join('')}</select></div>
     </div>
+  </div>
+  <div class="card" style="max-width:560px;margin-bottom:14px">
+    <span class="ml" style="margin-bottom:10px">Modelo do contrato terapêutico</span>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.8;margin-bottom:10px">
+      Usado em <em>Paciente → Combinados → Contrato</em>. Ajuste ao seu jeito de trabalhar. Os campos entre chaves são trocados automaticamente:
+      <code style="color:var(--gold)">{paciente} {valor} {frequencia} {horarios} {analista}</code>.
+    </div>
+    <textarea class="ta" style="min-height:220px;font-size:12px;font-family:var(--sans)" onchange="updSetting('contrato',this.value)">${esc(settings.contrato||CONTRATO_PADRAO)}</textarea>
+    <button class="btn bg bs" style="margin-top:8px" onclick="if(confirm('Voltar ao modelo padrão? Suas alterações serão perdidas.')){updSetting('contrato','');rSettings(document.getElementById('cnt'));bioList();}">Restaurar modelo padrão</button>
   </div>
   <div class="card" style="max-width:560px;margin-bottom:14px">
     <span class="ml" style="margin-bottom:10px">Entrar com digital ou rosto</span>
@@ -1404,6 +1469,300 @@ function gcalCopy(){
   else{ta.select();document.execCommand('copy');done();}
 }
 
+// ══ ROTINA CLÍNICA: horário fixo, lembretes, documentos ══════
+const DIAS=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+const isoD=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+let _seq=0;const novoId=()=>Date.now()*1000+(++_seq%1000);
+
+// Sessões de amanhã, com botão de lembrete por WhatsApp
+function lembretesHtml(){
+  const am=diasAtras(-1),list=[];
+  ativos().forEach(p=>(p.sessions||[]).filter(s=>s.date===am&&s.status==='agendada').forEach(s=>list.push({p,s})));
+  if(!list.length)return'';
+  list.sort((a,b)=>(a.s.time||'').localeCompare(b.s.time||''));
+  return`<div class="card" style="margin-bottom:14px;border-color:var(--gbd)">
+    <span class="ml" style="color:var(--green);margin-bottom:6px">Amanhã · enviar lembrete (${list.length})</span>
+    ${list.map(({p,s})=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--bd);flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--cream);cursor:pointer" onclick="go('patient',${p.id},'sessoes')">${s.time||'--'} · ${esc(p.name)}${s.lembrete?' <span style="font-size:10px;color:var(--green);font-family:var(--sans)">✓ enviado</span>':''}</span>
+      <button class="btn ${s.lembrete?'bg':'bgr'} bs" onclick="enviarLembrete(${p.id},${s.id})">${s.lembrete?'Enviar de novo':'Lembrar no WhatsApp'}</button></div>`).join('')}
+  </div>`;
+}
+function enviarLembrete(pid,sid){
+  const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;
+  s.lembrete=true;save();window.open(waUrl(p,s.date,s.time),'_blank');render();
+}
+
+// Texto dos horários fixos: "Terça 14:00, Quinta 14:00"
+function horariosTxt(p){
+  const sch=p.schedule||{};
+  return[1,2,3,4,5,6,0].filter(d=>sch[d]).map(d=>`${DIAS[d]} às ${sch[d]}`).join(', ');
+}
+function setSched(pid,d,t){
+  const p=gp(pid);if(!p)return;p.schedule=p.schedule||{};
+  if(t)p.schedule[d]=t;else delete p.schedule[d];
+  save();go('patient',pid,'combinados');
+}
+// Cria as sessões do mês a partir dos horários fixos (só de hoje em diante, sem duplicar)
+function gerarSessoes(pids,mes){
+  if(!mes)return;
+  const[y,m]=mes.split('-').map(Number),fim=new Date(y,m,0).getDate(),hoje=td();
+  let criadas=0,jaTinha=0;
+  pids.forEach(pid=>{
+    const p=gp(pid);if(!p||p.archived||!p.schedule)return;
+    for(let dia=1;dia<=fim;dia++){
+      const dt=new Date(y,m-1,dia),t=p.schedule[dt.getDay()];if(!t)continue;
+      const iso=isoD(dt);if(iso<hoje)continue;
+      if((p.sessions||[]).some(s=>s.date===iso)){jaTinha++;continue;}
+      (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});
+      criadas++;
+    }
+    sortSess(p);
+  });
+  save();render();
+  showToast(criadas?`${criadas} sessão(ões) criada(s)${jaTinha?` · ${jaTinha} dia(s) já tinham sessão`:''}. Feriados ou férias: cancele na lista.`:'Nenhuma sessão nova (já geradas, ou sem horário fixo).');
+}
+
+// Aba "Combinados" do paciente
+function rCombinados(p){
+  const sch=p.schedule||{};
+  const linhas=[1,2,3,4,5,6,0].map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-family:var(--sans);font-size:12px;color:#bbb">
+      <label style="display:flex;align-items:center;gap:8px;width:110px;cursor:pointer"><input type="checkbox" ${sch[d]?'checked':''} onchange="setSched(${p.id},${d},this.checked?(document.getElementById('sch-${d}').value||'10:00'):'')">${DIAS[d]}</label>
+      <input type="time" class="inp" id="sch-${d}" style="width:110px;padding:4px 8px;font-size:12px" value="${sch[d]||''}" onchange="if(this.value)setSched(${p.id},${d},this.value)"></div>`).join('');
+  return`<div class="g2">
+    <div class="card">
+      <span class="ml">Horário fixo</span>
+      <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:8px">Marque os dias e horários das sessões. Depois gere as sessões do mês de uma vez (também na Agenda).</div>
+      ${linhas}
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <input type="month" class="inp" id="gen-mes" style="width:auto;padding:6px 10px;font-size:12px" value="${td().slice(0,7)}">
+        <button class="btn bp bs" onclick="gerarSessoes([${p.id}],document.getElementById('gen-mes').value)">Gerar sessões do mês</button>
+      </div>
+    </div>
+    <div class="card">
+      <span class="ml">Documentos</span>
+      ${docLinha(p,'contrato','Contrato terapêutico','Valor, frequência, faltas, férias, sigilo. Modelo editável em Configurações.')}
+      ${docLinha(p,'termo','Termo de consentimento (LGPD)','Autorização específica para guardar dados e anotações, inclusive discussão em supervisão sem identificação.')}
+      <div class="divl"></div>
+      <span class="ml">Encerramento</span>
+      ${p.archived?`<div style="font-size:12px;color:#aaa;font-family:var(--sans);margin-bottom:8px">Alta em ${fmtD(p.archivedDate)}${p.archiveReason?' · '+esc(p.archiveReason):''}</div><button class="btn bg bs" onclick="reativarPac(${p.id})">Retomar acompanhamento</button>`
+      :`<div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:8px">Ao encerrar, o paciente sai da lista mas o prontuário fica guardado.</div><button class="btn bg bs" onclick="confirmDel(${p.id})">Encerrar acompanhamento (alta)</button>`}
+    </div>
+  </div>`;
+}
+function docLinha(p,tipo,titulo,desc){
+  const k=tipo+'Date',d=p[k];
+  return`<div style="padding:9px 0;border-bottom:1px solid var(--bd)">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="min-width:0;flex:1"><div style="font-size:13px;color:var(--cream)">${titulo}</div><div style="font-size:11px;color:var(--dim);font-family:var(--sans);line-height:1.5">${desc}</div></div>
+      <button class="btn bg bs" onclick="gerarDoc(${p.id},'${tipo}')">Gerar / imprimir</button></div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;font-family:var(--sans);color:${d?'var(--green)':'var(--red)'};flex-wrap:wrap">
+      ${d?'✓ Assinado em':'✗ Não assinado · data da assinatura:'}
+      <input type="date" class="inp" style="width:auto;padding:3px 6px;font-size:11px" value="${d||''}" onchange="updPat(${p.id},'${k}',this.value);render()"></div>
+  </div>`;
+}
+
+const CONTRATO_PADRAO=`1. FREQUÊNCIA E HORÁRIOS
+As sessões acontecem com frequência {frequencia}, nos horários: {horarios}. Mudanças de horário são combinadas entre as partes.
+
+2. VALOR E PAGAMENTO
+O valor de cada sessão é de {valor}. O pagamento é feito até o dia 10 do mês seguinte às sessões, por Pix, transferência ou dinheiro.
+
+3. FALTAS E CANCELAMENTOS
+O horário é reservado ao(à) analisando(a). Faltas e cancelamentos com menos de 24 horas de antecedência são cobrados normalmente.
+
+4. FÉRIAS E RECESSOS
+As férias do(a) analista são avisadas com antecedência e não são cobradas. Ausências do(a) analisando(a) por férias devem ser combinadas previamente.
+
+5. REAJUSTE
+O valor pode ser reajustado uma vez ao ano, com aviso de 30 dias.
+
+6. SIGILO
+O conteúdo das sessões é sigiloso. O sigilo só pode ser quebrado nas situações previstas em lei ou em caso de risco grave à vida. Casos podem ser discutidos em supervisão, sem identificação do(a) analisando(a).
+
+7. ATENDIMENTO ONLINE
+Quando online, as sessões ocorrem por videochamada, cabendo a cada parte estar em ambiente reservado.
+
+8. ENCERRAMENTO
+O trabalho pode ser interrompido por qualquer das partes, de preferência após conversa em sessão.
+
+9. NATUREZA DO TRABALHO
+{analista} atua como psicanalista. A psicanálise não substitui acompanhamento médico ou psiquiátrico quando este for necessário.`;
+
+const TERMO_LGPD=`Eu, {paciente}, CPF {cpf}, autorizo {analista} a coletar, registrar e guardar meus dados pessoais e meus dados pessoais sensíveis (relacionados à saúde e à vida psíquica), nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018), exclusivamente para:
+
+• realizar e registrar o acompanhamento psicanalítico;
+• agendar sessões, comunicar-se comigo e controlar pagamentos;
+• emitir recibos.
+
+Estou ciente de que:
+
+1. Meus dados ficam em sistema protegido por senha, com acesso restrito ao(à) analista.
+2. Meus dados não são compartilhados com terceiros, salvo obrigação legal ou com minha autorização expressa.
+3. O caso poderá ser discutido em supervisão clínica, sem qualquer identificação.
+4. Os registros são guardados mesmo após o fim do acompanhamento, pelo tempo necessário às finalidades acima e às obrigações legais.
+5. Posso, a qualquer momento, pedir acesso ou correção dos meus dados e revogar este consentimento, sem prejuízo dos registros que precisem ser mantidos.
+
+[  ] Autorizo, de forma específica e destacada, o tratamento dos meus dados pessoais sensíveis nas condições acima.`;
+
+function gerarDoc(pid,tipo){
+  const p=gp(pid);if(!p)return;
+  const analista=settings.name||'o(a) analista';
+  const rep=t=>t.replace(/\{paciente\}/g,p.name).replace(/\{analista\}/g,analista).replace(/\{valor\}/g,fmt(p.sessionValue))
+    .replace(/\{frequencia\}/g,(p.frequency||'semanal').toLowerCase()).replace(/\{horarios\}/g,horariosTxt(p)||'a combinar').replace(/\{cpf\}/g,p.cpf||'______________');
+  const titulo=tipo==='contrato'?'CONTRATO DE ATENDIMENTO PSICANALÍTICO':'TERMO DE CONSENTIMENTO PARA TRATAMENTO DE DADOS PESSOAIS';
+  const intro=tipo==='contrato'?`<p>Pelo presente, <strong>${esc(p.name)}</strong>${p.cpf?`, CPF ${esc(p.cpf)},`:''} doravante analisando(a), e <strong>${esc(analista)}</strong>${settings.cpf?`, CPF ${esc(settings.cpf)},`:''} psicanalista, combinam as condições do trabalho analítico:</p>`:'';
+  const corpo=esc(rep(tipo==='contrato'?(settings.contrato||CONTRATO_PADRAO):TERMO_LGPD)).replace(/\n/g,'<br>');
+  const hoje=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${titulo} – ${esc(p.name)}</title><style>
+  body{font-family:Georgia,serif;max-width:720px;margin:0 auto;padding:44px 40px;color:#111;line-height:1.7;font-size:14px}
+  h1{font-size:16px;letter-spacing:.08em;text-align:center;margin:0 0 22px;font-weight:600}
+  .sig{display:flex;gap:40px;margin-top:70px}.sig div{flex:1;text-align:center;font-size:13px}.ln{border-top:1px solid #333;margin-bottom:6px}
+  @media print{body{padding:16px}}</style></head><body>
+  <h1>${titulo}</h1>${intro}<p>${corpo}</p>
+  <p style="text-align:right;margin-top:28px">${esc(settings.city||'')}${settings.city?', ':''}${hoje}.</p>
+  <div class="sig"><div><div class="ln"></div>${esc(p.name)}</div><div><div class="ln"></div>${esc(analista)}<br><span style="font-size:11px;color:#555">${esc(settings.title||'Psicanalista')}</span></div></div>
+  </body></html>`;
+  const w=window.open('','_blank');if(!w){showToast('Permita pop-ups para gerar o documento.','err');return;}
+  w.document.write(html);w.document.close();setTimeout(()=>w.print(),300);
+}
+
+// ══ LIVRO-CAIXA: receitas, despesas e carnê-leão ═════════════
+const CAT_DESP=['Aluguel do consultório','Condomínio, luz, água','Internet e telefone','Material e livros','Supervisão','Análise pessoal','Cursos e formação','Impostos e taxas','Outros'];
+let caixaAno=new Date().getFullYear(),caixaMes=null;
+
+// Recebimentos: sessões pagas, pela data do pagamento
+function recebimentos(){
+  const r=[];
+  patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),p,s})));
+  return r.sort((a,b)=>a.data.localeCompare(b.data));
+}
+function rCaixa(c){
+  const ano=String(caixaAno),rec=recebimentos().filter(x=>x.data.startsWith(ano)),des=despesas.filter(d=>(d.date||'').startsWith(ano));
+  const meses=Array.from({length:12},(_,i)=>{const m=`${ano}-${String(i+1).padStart(2,'0')}`;
+    const r=rec.filter(x=>x.data.startsWith(m)).reduce((a,x)=>a+x.valor,0),d=des.filter(x=>x.date.startsWith(m)).reduce((a,x)=>a+Number(x.value||0),0);return{m,r,d};});
+  const tR=meses.reduce((a,x)=>a+x.r,0),tD=meses.reduce((a,x)=>a+x.d,0);
+  const nm=m=>new Date(m+'-15T12:00').toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
+  let det='';
+  if(caixaMes){
+    const r=rec.filter(x=>x.data.startsWith(caixaMes)),d=des.filter(x=>x.date.startsWith(caixaMes)).sort((a,b)=>a.date.localeCompare(b.date));
+    const nomeM=new Date(caixaMes+'-15T12:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    det=`<div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="ml" style="margin-bottom:0">Detalhe de ${nomeM}</span>
+        <div style="display:flex;gap:6px"><button class="btn bgo bs" onclick="csvCarne('${caixaMes}')">↓ Planilha do mês (carnê-leão)</button><button class="btn bg bs" onclick="caixaMes=null;rCaixa(document.getElementById('cnt'))">Fechar</button></div></div>
+      <div class="ml" style="color:var(--green)">Recebimentos (${r.length}) · ${fmt(r.reduce((a,x)=>a+x.valor,0))}</div>
+      ${r.length?r.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:#ccc">${fmtD(x.data)} · ${esc(x.p.name)}${x.p.cpf?' · CPF '+esc(x.p.cpf):' · <span style="color:var(--red)">sem CPF</span>'}</span><span style="color:var(--green)">${fmt(x.valor)}${x.s.payMethod?' · '+esc(x.s.payMethod):''}</span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhum recebimento.</div>'}
+      <div class="ml" style="color:var(--red);margin-top:14px">Despesas (${d.length}) · ${fmt(d.reduce((a,x)=>a+Number(x.value||0),0))}</div>
+      ${d.length?d.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;align-items:center"><span style="color:#ccc">${fmtD(x.date)} · ${esc(x.desc||x.cat)} <span style="color:var(--dim)">(${esc(x.cat)})</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:var(--red)">${fmt(x.value)}</span><button class="btn brd bs" style="padding:2px 7px" onclick="delDespesa(${x.id})">✕</button></span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhuma despesa.</div>'}
+    </div>`;
+  }
+  c.innerHTML=`
+  <div class="card" style="margin-bottom:14px;padding:14px 18px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:8px"><button class="btn bg bs" onclick="caixaAno--;caixaMes=null;rCaixa(document.getElementById('cnt'))">‹</button><span style="font-size:18px;color:var(--gold)">${ano}</span><button class="btn bg bs" onclick="caixaAno++;caixaMes=null;rCaixa(document.getElementById('cnt'))">›</button></div>
+    <div style="display:flex;gap:16px;font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:var(--green)">Recebido ${fmt(tR)}</span><span style="color:var(--red)">Despesas ${fmt(tD)}</span><span style="color:var(--cream)">Resultado ${fmt(tR-tD)}</span></div>
+  </div></div>
+  <div class="card" style="margin-bottom:14px"><span class="ml" style="margin-bottom:8px">Mês a mês (toque num mês para ver o detalhe)</span>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:var(--sans);font-size:12px;min-width:340px">
+      <tr style="color:var(--dim);text-align:right"><th style="text-align:left;padding:6px;font-weight:400">Mês</th><th style="padding:6px;font-weight:400">Recebido</th><th style="padding:6px;font-weight:400">Despesas</th><th style="padding:6px;font-weight:400">Resultado</th></tr>
+      ${meses.map(x=>`<tr onclick="caixaMes='${x.m}';rCaixa(document.getElementById('cnt'))" style="cursor:pointer;border-top:1px solid var(--bd);text-align:right;${caixaMes===x.m?'background:#1a1508':''}"><td style="text-align:left;padding:7px 6px;color:var(--cream);text-transform:capitalize">${nm(x.m)}</td><td style="padding:7px 6px;color:${x.r?'var(--green)':'var(--dim)'}">${fmt(x.r)}</td><td style="padding:7px 6px;color:${x.d?'var(--red)':'var(--dim)'}">${fmt(x.d)}</td><td style="padding:7px 6px;color:var(--cream)">${fmt(x.r-x.d)}</td></tr>`).join('')}
+    </table></div>
+  </div>
+  ${det}
+  <div class="g2">
+    <div class="card"><span class="ml" style="margin-bottom:8px">Nova despesa</span>
+      <div class="g2 fg" style="gap:10px">
+        <div class="fi"><label>Data</label><input type="date" class="inp" id="dp-date" value="${td()}"></div>
+        <div class="fi"><label>Valor (R$)</label><input type="number" min="0" step="0.01" class="inp" id="dp-val"></div>
+      </div>
+      <div class="fi"><label>Categoria</label><select class="sel" id="dp-cat">${CAT_DESP.map(x=>`<option>${x}</option>`).join('')}</select></div>
+      <div class="fi"><label>Descrição (opcional)</label><input type="text" class="inp" id="dp-desc" placeholder="Ex.: aluguel de outubro"></div>
+      <button class="btn bp bs" onclick="addDespesa()">Lançar despesa</button>
+    </div>
+    <div class="card"><span class="ml" style="margin-bottom:8px">Sobre o carnê-leão</span>
+      <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.8">
+        • Como autônoma(o), você informa <strong style="color:#ccc">todo mês</strong> o que recebeu de pessoas físicas no <em>Carnê-Leão Web</em> (e-CAC) e paga o DARF até o último dia útil do mês seguinte.<br>
+        • Os recebimentos aqui contam pela <strong style="color:#ccc">data do pagamento</strong> marcada em cada sessão.<br>
+        • Despesas de <em>livro-caixa</em> ligadas ao trabalho (como aluguel do consultório) podem reduzir o imposto.<br>
+        • Use a planilha do mês para lançar ou enviar ao contador. <strong style="color:#ccc">Confirme sempre com seu contador.</strong>
+      </div>
+    </div>
+  </div>`;
+}
+function addDespesa(){
+  const v=parseFloat(document.getElementById('dp-val').value),date=document.getElementById('dp-date').value;
+  if(!date||!(v>0)){showToast('Informe a data e o valor.','err');return;}
+  despesas.push({id:novoId(),date,value:v,cat:document.getElementById('dp-cat').value,desc:document.getElementById('dp-desc').value.trim()});
+  save();caixaAno=Number(date.slice(0,4));caixaMes=date.slice(0,7);rCaixa(document.getElementById('cnt'));showToast('Despesa lançada.');
+}
+function delDespesa(id){if(!confirm('Excluir esta despesa?'))return;despesas=despesas.filter(d=>d.id!==id);save();rCaixa(document.getElementById('cnt'));}
+function csvCarne(mes){
+  const q=v=>String(v??'').replace(/"/g,'""');
+  const r=recebimentos().filter(x=>x.data.startsWith(mes)),d=despesas.filter(x=>(x.date||'').startsWith(mes));
+  let csv=`Livro-caixa ${mes}\n\nRECEBIMENTOS\nData pagamento,Paciente (pagador),CPF,Data da sessao,Forma,Valor\n`;
+  r.forEach(x=>{csv+=`"${fmtD(x.data)}","${q(x.p.name)}","${q(x.p.cpf)}","${fmtD(x.s.date)}","${q(x.s.payMethod)}","${x.valor.toFixed(2).replace('.',',')}"\n`;});
+  csv+=`"","","","","Total","${r.reduce((a,x)=>a+x.valor,0).toFixed(2).replace('.',',')}"\n\nDESPESAS\nData,Categoria,Descricao,Valor\n`;
+  d.forEach(x=>{csv+=`"${fmtD(x.date)}","${q(x.cat)}","${q(x.desc)}","${Number(x.value).toFixed(2).replace('.',',')}"\n`;});
+  csv+=`"","","Total","${d.reduce((a,x)=>a+Number(x.value||0),0).toFixed(2).replace('.',',')}"\n`;
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`livro-caixa_${mes}.csv`;a.click();
+  showToast('Planilha baixada.');
+}
+
+// ══ FORMAÇÃO: análise pessoal, supervisão, estudos ══════════
+const TIPOS_FORM=['Análise pessoal','Supervisão','Seminário / estudo','Grupo de estudos','Curso / congresso'];
+function rFormacao(c){
+  const ano=String(new Date().getFullYear()),doAno=formacao.filter(f=>(f.date||'').startsWith(ano));
+  const hrs=t=>doAno.filter(f=>f.type===t).reduce((a,f)=>a+Number(f.hours||0),0);
+  const flag=[];patients.forEach(p=>(p.sessions||[]).filter(s=>s.supervisao).forEach(s=>flag.push({p,s})));
+  flag.sort((a,b)=>b.s.date.localeCompare(a.s.date));
+  const lista=formacao.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  c.innerHTML=`
+  <div class="g4" style="margin-bottom:14px">
+    ${[['Análise pessoal',hrs('Análise pessoal')],['Supervisão',hrs('Supervisão')],['Estudos',hrs('Seminário / estudo')+hrs('Grupo de estudos')+hrs('Curso / congresso')],['Investido',null]].map(([l,v])=>`<div class="card"><span class="ml">${l} · ${ano}</span><div class="mv" style="color:var(--gold)">${v===null?fmt(doAno.reduce((a,f)=>a+Number(f.value||0),0)):(Math.round(v*10)/10)+'h'}</div></div>`).join('')}
+  </div>
+  <div class="g2">
+    <div>
+      <div class="card" style="margin-bottom:14px"><span class="ml" style="margin-bottom:8px">Casos para levar à supervisão (${flag.length})</span>
+        ${flag.length?flag.map(({p,s})=>`<div style="padding:8px 0;border-bottom:1px solid var(--bd)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:13px;color:var(--cream);cursor:pointer" onclick="go('patient',${p.id},'sessoes');flashSess(${s.id})">${esc(p.name)} · <span style="color:var(--gold)">${fmtD(s.date)}</span></span>
+          <button class="btn bg bs" onclick="supervisionado(${p.id},${s.id})">✓ Levado</button></div>
+          ${s.themes?`<div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-top:3px">${esc(s.themes)}</div>`:''}</div>`).join('')
+        :'<div style="font-size:12px;color:var(--dim);font-family:var(--sans);line-height:1.7">Nenhum. Na sessão do paciente, marque <em>"Levar à supervisão"</em> e o caso aparece aqui.</div>'}
+      </div>
+      <div class="card"><span class="ml" style="margin-bottom:8px">Registrar</span>
+        <div class="g2 fg" style="gap:10px">
+          <div class="fi"><label>Tipo</label><select class="sel" id="fm-tipo">${TIPOS_FORM.map(t=>`<option>${t}</option>`).join('')}</select></div>
+          <div class="fi"><label>Data</label><input type="date" class="inp" id="fm-date" value="${td()}"></div>
+          <div class="fi"><label>Horas</label><input type="number" min="0" step="0.25" class="inp" id="fm-hrs" value="1"></div>
+          <div class="fi"><label>Valor (R$)</label><input type="number" min="0" step="0.01" class="inp" id="fm-val" placeholder="0"></div>
+        </div>
+        <div class="fi"><label>Com quem / instituição</label><input type="text" class="inp" id="fm-com" placeholder="Ex.: supervisora, escola de psicanálise"></div>
+        <div class="fi"><label>Anotações (opcional)</label><textarea class="ta" id="fm-notas" style="min-height:60px" placeholder="Temas, textos, apontamentos da supervisão…"></textarea></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;font-family:var(--sans);margin-bottom:10px"><input type="checkbox" id="fm-desp" checked> Lançar o valor como despesa no livro-caixa</label>
+        <button class="btn bp bs" onclick="addFormacao()">Registrar</button>
+      </div>
+    </div>
+    <div class="card"><span class="ml" style="margin-bottom:8px">Histórico (${lista.length})</span>
+      ${lista.length?lista.map(f=>`<div style="padding:8px 0;border-bottom:1px solid var(--bd)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+        <div><div style="font-size:13px;color:var(--cream)">${esc(f.type)}${f.with?' · '+esc(f.with):''}</div><div style="font-size:11px;color:var(--dim);font-family:var(--sans)">${fmtD(f.date)} · ${f.hours||0}h${Number(f.value)>0?' · '+fmt(f.value):''}</div>
+        ${f.notes?`<div style="font-size:12px;color:#888;margin-top:4px;white-space:pre-wrap;line-height:1.6">${esc(f.notes)}</div>`:''}</div>
+        <button class="btn brd bs" style="padding:2px 7px;flex-shrink:0" onclick="delFormacao(${f.id})">✕</button></div></div>`).join('')
+      :'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nada registrado ainda.</div>'}
+    </div>
+  </div>`;
+}
+function addFormacao(){
+  const g=id=>document.getElementById(id);
+  const date=g('fm-date').value,type=g('fm-tipo').value,value=parseFloat(g('fm-val').value)||0;
+  if(!date){showToast('Informe a data.','err');return;}
+  formacao.push({id:novoId(),date,type,hours:parseFloat(g('fm-hrs').value)||0,value,with:g('fm-com').value.trim(),notes:g('fm-notas').value.trim()});
+  if(value>0&&g('fm-desp').checked){
+    const cat=type==='Supervisão'?'Supervisão':type==='Análise pessoal'?'Análise pessoal':'Cursos e formação';
+    despesas.push({id:novoId(),date,value,cat,desc:type+(g('fm-com').value.trim()?' – '+g('fm-com').value.trim():'')});
+  }
+  save();rFormacao(document.getElementById('cnt'));showToast('Registrado.');
+}
+function delFormacao(id){if(!confirm('Excluir este registro? (Uma despesa lançada junto continua no livro-caixa.)'))return;formacao=formacao.filter(f=>f.id!==id);save();rFormacao(document.getElementById('cnt'));}
+function supervisionado(pid,sid){const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;s.supervisao=false;s.supervDate=td();save();rFormacao(document.getElementById('cnt'));showToast('Marcado como levado à supervisão.');}
+
 // ── CSV EXPORT ────────────────────────────────────────────────
 function exportCSV(type){
   const range=getDateRange(finFilter,finFrom,finTo);const{from,to}=range;
@@ -1430,7 +1789,7 @@ function exportCSV(type){
 }
 
 // ── JSON BACKUP ───────────────────────────────────────────────
-function exportJSON(){const blob=new Blob([JSON.stringify({patients,waitlist,settings},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clinica_${td()}.json`;a.click();showToast('Backup baixado. Guarde em local seguro.');}
+function exportJSON(){const blob=new Blob([JSON.stringify({patients,waitlist,settings,despesas,formacao},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clinica_${td()}.json`;a.click();showToast('Backup baixado. Guarde em local seguro.');}
 
 // Importa um backup .json (deste app ou da versão antiga que salvava no navegador)
 function importJSON(input){

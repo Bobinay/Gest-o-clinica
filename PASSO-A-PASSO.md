@@ -15,7 +15,7 @@ Leva uns 15 minutos. Você não precisa editar nenhum arquivo.
 | O `.htaccess` estava com o nome `download`, e o login podia ser pulado. | Proteção ativa: sem senha, ninguém vê nada. |
 | Falta não entrava no financeiro. | Novo status **Falta cobrada**, que entra na cobrança. |
 | — | Lista **Em aberto** com todas as pendências, botão **Cobrar no WhatsApp** (com sua chave Pix) e **Marcar tudo pago**. |
-| — | **Recibo** pronto para imprimir/PDF, com CPF e valor por extenso (vale para o Imposto de Renda do paciente). |
+| — | **Recibo** pronto para imprimir/PDF, com CPF e valor por extenso (comprovante de pagamento e para reembolso; sem CRP, não é dedutível no Imposto de Renda). |
 | Mudar o valor da sessão alterava o histórico. | Cada sessão guarda o próprio valor. Reajustes não mexem no passado. |
 | — | Backup automático diário no servidor (últimos 60 dias). |
 
