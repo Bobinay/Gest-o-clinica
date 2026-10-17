@@ -397,7 +397,8 @@ const netS=s=>Number(s.paidNet??s.paidAmount??0);
 const netK=k=>Number(k.net??k.amount??0);
 // Sessões avulsas somam pelo valor da sessão; sessões de pacote NÃO entram aqui
 // (o pacote conta pelo valor combinado, na data do pagamento — ver finPac)
-function sumBill(p,sess){const b=sess.filter(s=>isBill(s)&&!s.pkg&&!s.free);const total=b.reduce((a,s)=>a+sv(p,s),0);const paid=b.reduce((a,s)=>a+Number(s.paidAmount||0),0);const net=b.filter(s=>s.paid).reduce((a,s)=>a+netS(s),0);return{total,paid,net,pending:total-paid,count:b.length};}
+// Entra tudo que é cobrável e também qualquer sessão já paga (antecipada, ou paga e depois cancelada)
+function sumBill(p,sess){const b=sess.filter(s=>(isBill(s)||s.paid)&&!s.pkg&&!s.free);const total=b.reduce((a,s)=>a+sv(p,s),0);const paid=b.reduce((a,s)=>a+Number(s.paidAmount||0),0);const net=b.filter(s=>s.paid).reduce((a,s)=>a+netS(s),0);return{total,paid,net,pending:total-paid,count:b.length};}
 // Pacotes pagos no período (bruto e líquido)
 function finPac(p,from,to){const ks=(p.pacotes||[]).filter(k=>k.tipo!=='parcelado'&&k.date>=from&&k.date<=to);return{total:ks.reduce((a,k)=>a+Number(k.amount||0),0),net:ks.reduce((a,k)=>a+netK(k),0),n:ks.length};}
 // Resumo financeiro de um paciente num período: avulsas pela data da sessão + pacotes pela data do pagamento
@@ -771,11 +772,11 @@ function rPatient(c,pt,ps,ta){
       const pkB=pk?(bonus?`<div style="font-size:10px;color:var(--purple);font-family:var(--sans);margin-bottom:6px" title="Passa das ${incluiDe(pk)} sessões que o pacote cobre">🎁 Sessão extra do pacote<br><span style="color:var(--dim)">(sem custo · até ${fmtD(pk.to).slice(0,5)})</span></div>`:`<div style="font-size:10px;color:var(--green);font-family:var(--sans);margin-bottom:6px" title="Pagamento antecipado de ${fmtD(pk.from)} a ${fmtD(pk.to)}">📦 Pago no pacote até ${fmtD(pk.to).slice(0,5)}</div>`):'';
       const fechou=!s.paid&&!pk&&isBill(s)&&mesFechou(p,s);
       const freeBtn=`<button class="btn ${fechou?'bp':'bg'} bs" style="margin-top:5px" title="Sessão sobressalente: realizada, mas sem cobrança" onclick="setSemCusto(${p.id},${s.id},true)">${fechou?'Mês fechou · sem custo?':'Sem custo'}</button>`;
-      const pay=s.free&&isBill(s)?`<div style="font-size:11px;color:var(--purple);font-family:var(--sans);margin-bottom:6px" title="Realizada, mas fora do faturamento">🎁 Sem custo<br><span style="font-size:10px;color:var(--dim)">(sobressalente do mês)</span></div><button class="btn bg bs" onclick="setSemCusto(${p.id},${s.id},false)">Cobrar normalmente</button>`:pk&&!isBill(s)?pkB:isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
-        ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:(()=>{const kc=cicloParcelado(p,s.date);if(!kc)return'✗ Pendente';const g=progressoCiclo(p,kc);return`✗ Pendente<br><span style="color:var(--gold)">📦 ciclo: ${fmt(g.pago)} de ${fmt(kc.amount)}</span>`;})()}</div>`}
+      const pay=s.free&&isBill(s)?`<div style="font-size:11px;color:var(--purple);font-family:var(--sans);margin-bottom:6px" title="Realizada, mas fora do faturamento">🎁 Sem custo<br><span style="font-size:10px;color:var(--dim)">(sobressalente do mês)</span></div><button class="btn bg bs" onclick="setSemCusto(${p.id},${s.id},false)">Cobrar normalmente</button>`:pk&&!isBill(s)?pkB:(isBill(s)||(s.status==='agendada'&&!s.free))?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
+        ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.status==='agendada'?' antecipado':''}${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:s.status==='agendada'?'Ainda não pago':(()=>{const kc=cicloParcelado(p,s.date);if(!kc)return'✗ Pendente';const g=progressoCiclo(p,kc);return`✗ Pendente<br><span style="color:var(--gold)">📦 ciclo: ${fmt(g.pago)} de ${fmt(kc.amount)}</span>`;})()}</div>`}
         ${s.paid&&!pk?`<div style="font-size:10px;font-family:var(--sans);margin-bottom:5px;color:var(--dim);cursor:pointer" title="Toque para corrigir o valor que entrou na conta" onclick="editLiquido(${p.id},${s.id})">na conta: <span style="color:var(--green);text-decoration:underline dotted">${fmt(netS(s))}</span></div>`:''}
         ${s.paid&&!pk?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updPayMethod(${p.id},${s.id},this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
-        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':'Marcar Pago'}</button>${!s.paid&&!pk?`<br>${freeBtn}`:''}`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
+        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':s.status==='agendada'?'Já pagou (antecipado)':'Marcar Pago'}</button>${!s.paid&&!pk?`<br>${freeBtn}`:''}`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
       return`<div class="sr"><div class="sg">
         <div class="sd" id="sess-${s.id}">
           <input type="date" class="inp sdate" value="${s.date}" title="Data da sessão (pode corrigir)" onchange="updSessWhen(${p.id},${s.id},'date',this.value)">
@@ -1129,6 +1130,10 @@ function rNewSess(c){
     </div>
     <div class="fi"><label>Temas da Sessão</label><input type="text" class="inp" id="ns-themes" placeholder="ex: sonhos, luto, relação com pai"></div>
     <div class="fi"><label>Anotações</label><textarea class="ta" id="ns-notes" placeholder="Anotações clínicas…"></textarea></div>
+    <div id="ns-pago-w" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#0d0d0d;border:1px solid var(--bd2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-family:var(--sans);font-size:12px;color:#ccc">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="ns-pago" onchange="document.getElementById('ns-pago-met').style.display=this.checked?'':'none'"> Já está pago (antecipado)</label>
+      <select class="sel" id="ns-pago-met" style="width:auto;padding:4px 8px;font-size:12px;display:none">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select>
+    </div>
     <div id="ns-wa" style="background:#071410;border:1px solid var(--gbd);border-radius:8px;padding:14px;margin-bottom:14px">
       <div class="ml" style="color:var(--green);margin-bottom:7px">Ao salvar como Agendada, esta mensagem abre pronta</div>
       <div style="font-size:11px;color:#888;font-family:var(--sans);line-height:1.85;white-space:pre-wrap">${esc(prevMsg)}</div>
@@ -1166,6 +1171,7 @@ function saveNewSess(){
   const p=gp(apid);if(!p)return;
   const sess={id:Date.now(),date,time,status,value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:document.getElementById('ns-mood').value,themes:document.getElementById('ns-themes').value.trim(),notes:document.getElementById('ns-notes').value.trim()};
   if(!p.sessions)p.sessions=[];
+  if(document.getElementById('ns-pago')?.checked&&!sess.pkg)markPaid(p,sess,true,document.getElementById('ns-pago-met').value);
   p.sessions.push(sess);sortSess(p);syncPacotes(p);
   save();showToast(sess.pkg?'Sessão salva (já paga no pacote).':'Sessão salva!');
   go('patient',p.id,'sessoes');
@@ -1186,7 +1192,11 @@ function updSessWhen(pid,sid,field,value){
   go('patient',pid,'sessoes');flashSess(sid);
 }
 function flashSess(sid){setTimeout(()=>{const el=document.getElementById('sess-'+sid);const row=el&&el.closest('.sr');if(row){row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('flash');}},120);}
-function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.status=status;syncPacotes(p);save();go('patient',pid,'sessoes');}
+function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;if((status==='cancelada'||status==='faltou')&&s.paid&&!s.pkg&&!confirm(`Esta sessão já foi PAGA (${fmt(s.paidAmount)}).
+
+Se ela vai acontecer em outro dia, use "Remarcar" em vez de cancelar, para o pagamento continuar valendo.
+
+Cancelar mesmo assim? (o pagamento continua registrado como recebido)`)){go('patient',pid,'sessoes');return;}s.status=status;syncPacotes(p);save();go('patient',pid,'sessoes');}
 function updSessField(pid,sid,field,value){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s[field]=value;save();}
 function markPaid(p,s,paid,method){s.paid=paid;s.paidAmount=paid?sv(p,s):0;s.paidDate=paid?td():'';if(paid&&method)s.payMethod=method;if(!paid)s.payMethod='';s.paidNet=paid?liquidoDe(s.paidAmount,s.payMethod):0;}
 // Sessão sobressalente: realizada (conta presença e prontuário), mas sem cobrança
