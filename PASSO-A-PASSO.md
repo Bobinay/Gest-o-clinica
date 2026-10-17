@@ -1,164 +1,120 @@
-# PASSO A PASSO — Hospedar o App na Hostgator
-# Thomaz Almeida · Sistema Clínico
-# =====================================================
+# Passo a passo: colocar o app na Hostgator
 
-## ESTRUTURA DE ARQUIVOS (o que você vai fazer upload)
+Thomaz Almeida · Sistema Clínico
 
-```
-app/                    ← pasta que você cria no servidor
-├── index.php           ← tela de LOGIN (senha aqui)
-├── app.php             ← proteção de sessão
-├── app.html            ← o aplicativo em si
-├── sair.php            ← botão de logout
-└── .htaccess           ← bloqueio de acesso direto
-```
+Leva uns 15 minutos. Você não precisa editar nenhum arquivo.
 
 ---
 
-## PASSO 1 — Definir sua senha
+## O que mudou nesta versão
 
-Abra o arquivo `index.php` em qualquer editor de texto
-(Bloco de Notas, TextEdit, VS Code)
-
-Procure a linha:
-```
-$SENHA = 'thomaz2025';
-```
-
-Troque `thomaz2025` pela senha que você quiser usar.
-Use algo forte: letras + números + símbolo.
-Exemplo: `Thom@z2024!`
-
-Salve o arquivo.
+| Antes | Agora |
+|---|---|
+| Os dados ficavam só no navegador. O que você anotava no celular não aparecia no computador. | Os dados ficam no servidor da Hostgator e sincronizam entre celular e computador. |
+| A senha estava escrita no código, num GitHub público. | No primeiro acesso, o app pede para você **criar** a senha. Ela não fica escrita em lugar nenhum. |
+| O `.htaccess` estava com o nome `download`, e o login podia ser pulado. | Proteção ativa: sem senha, ninguém vê nada. |
+| Falta não entrava no financeiro. | Novo status **Falta cobrada**, que entra na cobrança. |
+| — | Lista **Em aberto** com todas as pendências, botão **Cobrar no WhatsApp** (com sua chave Pix) e **Marcar tudo pago**. |
+| — | **Recibo** pronto para imprimir/PDF, com CPF e valor por extenso (vale para o Imposto de Renda do paciente). |
+| Mudar o valor da sessão alterava o histórico. | Cada sessão guarda o próprio valor. Reajustes não mexem no passado. |
+| — | Backup automático diário no servidor (últimos 60 dias). |
 
 ---
 
-## PASSO 2 — Acessar o cPanel da Hostgator
+## PASSO 1: Entrar no cPanel
 
-1. Acesse: https://www.hostgator.com.br
-2. Clique em "Minha Conta" → "Acessar cPanel"
-3. Faça login com seu usuário e senha da Hostgator
+1. Acesse https://financeiro.hostgator.com.br e faça login.
+2. Clique no seu plano de hospedagem e depois em **cPanel**.
 
----
+## PASSO 2: Conferir o SSL (cadeado)
 
-## PASSO 3 — Criar a pasta do app
+1. No cPanel, procure **SSL/TLS Status** (ou "Let's Encrypt" / "AutoSSL").
+2. Confira se o seu domínio `thomazalmeida.com` aparece com o cadeado verde.
+3. Se não aparecer, clique em **Run AutoSSL** e espere uns minutos.
 
-Dentro do cPanel:
+> O app obriga o uso de `https://`. Sem SSL ativo ele não abre. Isso é proposital: as anotações dos pacientes nunca devem trafegar sem criptografia.
 
-1. Clique em **"Gerenciador de Arquivos"**
-2. Navegue até a pasta `public_html`
-3. Clique em **"Nova Pasta"**
-4. Digite o nome: `app`
-   (o endereço final vai ser: `thomazalmeida.com/app`)
-5. Clique em "Criar Nova Pasta"
+## PASSO 3: Enviar o arquivo ZIP
 
----
+1. No cPanel, abra o **Gerenciador de Arquivos**.
+2. Entre na pasta `public_html`.
+3. Se já existir uma pasta `app` da tentativa anterior, **apague** essa pasta (ou renomeie para `app-antigo`).
+4. Clique em **Carregar** (Upload) e envie o arquivo **`clinica-app.zip`**.
+5. Volte para `public_html`, clique com o botão direito no `clinica-app.zip` e escolha **Extract** (Extrair).
+6. Isso cria a pasta `public_html/app` com tudo dentro. Pode apagar o `.zip` depois.
 
-## PASSO 4 — Fazer upload dos arquivos
+Confira se, dentro de `app`, existem os arquivos `.htaccess` (com ponto) e a pasta `dados`.
+Se o `.htaccess` não aparecer: clique em **Configurações** (canto superior direito) e marque **Mostrar arquivos ocultos**.
 
-Ainda no Gerenciador de Arquivos:
+## PASSO 4: Criar sua senha
 
-1. Abra a pasta `app` que você acabou de criar
-2. Clique no botão **"Upload"** (no topo)
-3. Faça upload dos 5 arquivos:
-   - `index.php`
-   - `app.php`
-   - `app.html`
-   - `sair.php`
-   - `.htaccess`
+1. Acesse **https://thomazalmeida.com/app**
+2. Como é o primeiro acesso, o app pede para você **criar uma senha**.
+   Use uma frase com números e símbolos, com pelo menos 8 caracteres. Exemplo de formato: `Divã-azul-2026!`
+3. Pronto, você já está dentro.
 
-⚠️ ATENÇÃO: O arquivo `.htaccess` começa com ponto.
-No Windows pode ficar oculto. Se não aparecer, ative
-"Mostrar arquivos ocultos" no Gerenciador de Arquivos
-do cPanel (opção no topo direito).
+> ⚠️ Faça o Passo 4 **logo depois** do Passo 3. Até a senha ser criada, quem abrir o endereço primeiro é quem define a senha.
 
----
+## PASSO 5: Preencher suas Configurações
 
-## PASSO 5 — Testar
+No menu, clique em **Configurações** e preencha nome, CPF, cidade e chave Pix. Isso aparece nos recibos e nas mensagens de cobrança.
 
-Acesse no navegador:
-```
-https://thomazalmeida.com/app
-```
+## PASSO 6: Trazer os dados antigos (se você já tinha usado o app)
 
-Você deve ver a tela de login com cadeado.
-Digite sua senha → você entra no app.
-
-Se outra pessoa acessar o mesmo link sem a senha → vê
-apenas a tela de login e não consegue entrar.
+- Se você usou a versão antiga **neste mesmo navegador**, o app vai perguntar automaticamente se quer importar. É só clicar OK.
+- Se usou em outro aparelho: abra a versão antiga lá, clique em **Backup JSON**, depois aqui use **Importar Backup**.
 
 ---
 
-## PASSO 6 — Ativar HTTPS (SSL gratuito)
+## No celular: instalar como app
 
-Isso garante que sua senha e dados dos pacientes
-trafeguem criptografados.
+**iPhone (Safari):**
+1. Abra `https://thomazalmeida.com/app` e faça login.
+2. Toque em **Compartilhar** (quadrado com seta) e depois em **Adicionar à Tela de Início**.
 
-1. No cPanel → procure **"SSL/TLS"** ou **"Let's Encrypt"**
-2. Selecione seu domínio `thomazalmeida.com`
-3. Clique em "Instalar" ou "Ativar"
-4. Aguarde 5 minutos
+**Android (Chrome):**
+1. Abra `https://thomazalmeida.com/app` e faça login.
+2. Toque nos 3 pontinhos e depois em **Instalar app** (ou "Adicionar à tela inicial").
 
-Depois de ativado, abra o `.htaccess` e remova o `#`
-das últimas 3 linhas (que forçam o HTTPS).
-
----
-
-## COMO FUNCIONA A SEGURANÇA
-
-| Situação | O que acontece |
-|----------|---------------|
-| Qualquer pessoa acessa thomazalmeida.com/app | Vê só a tela de login |
-| Alguém tenta acessar thomazalmeida.com/app/app.html diretamente | Bloqueado (403 Proibido) |
-| Você entra com a senha correta | Acessa o app normalmente |
-| Você fecha o navegador | Sessão dura até 8 horas |
-| Fica 8h sem usar | Faz logout automático |
-| Senha errada | Espera 1 segundo (dificulta tentativas automáticas) |
+Vai aparecer o ícone dourado com Ψ. O login dura até 8 horas sem uso.
 
 ---
 
-## NO CELULAR — Como salvar como atalho (sem precisar de senha toda vez)
+## Como usar no dia a dia
 
-No iPhone (Safari):
-1. Acesse thomazalmeida.com/app
-2. Faça login uma vez
-3. Toque no ícone de compartilhar (quadrado com seta)
-4. "Adicionar à Tela de Início"
-5. Nomeie "Clínica" e confirme
-
-No Android (Chrome):
-1. Acesse thomazalmeida.com/app
-2. Faça login uma vez
-3. Menu (3 pontos) → "Adicionar à tela inicial"
-4. Confirme
-
-A partir daí, o ícone na tela inicial abre direto o app.
-A sessão dura 8 horas — você só precisará logar novamente
-se ficar mais de 8 horas sem usar.
+- **Depois da sessão:** abra o paciente, depois **Sessões**, mude o status para *Realizada* e escreva as anotações. Tudo salva sozinho enquanto você digita. O indicador no topo mostra **✓ Salvo**.
+- **Falta:** escolha *Falta cobrada* (entra na cobrança) ou *Faltou (sem cobrança)*.
+- **Recebeu:** clique em **Marcar Pago** na sessão e escolha a forma (Pix, dinheiro…).
+- **Fim do mês:** vá em **Financeiro**. Na lista **Em aberto** estão todos que devem, com os botões **Cobrar no WhatsApp** e **Marcar tudo pago**.
+- **Recibo:** no paciente, na aba **Dados**, use **Gerar recibo do mês** e salve como PDF ou imprima.
+- **Valor diferente numa sessão** (desconto, valor social): edite o valor direto na sessão.
 
 ---
 
-## PROBLEMAS COMUNS
+## Segurança e backup
 
-**"Tela em branco após o login"**
-→ Verifique se o app.html foi enviado corretamente.
-→ Confira se o arquivo app.php está na mesma pasta.
-
-**"Erro 403 ao acessar /app"**
-→ O .htaccess pode estar mal configurado.
-→ Verifique se foi enviado corretamente (começa com ponto).
-
-**"Página não encontrada (404)"**
-→ Confirme que os arquivos estão dentro de public_html/app/
-→ O endereço correto é thomazalmeida.com/app (sem barra final)
-
-**"Não consigo ver o .htaccess no upload"**
-→ No Gerenciador de Arquivos do cPanel, clique em
-  "Configurações" (canto superior direito) e ative
-  "Mostrar arquivos ocultos (dotfiles)"
+- Os dados ficam em `public_html/app/dados/`, bloqueados para acesso pela internet.
+- Todo dia que você usa o app, uma cópia é guardada em `dados/backups/` (últimos 60 dias).
+- **Uma vez por mês**, clique em **Baixar Backup** e guarde o arquivo no seu computador ou num pendrive. Esse arquivo contém as anotações clínicas, então guarde com cuidado.
+- **Esqueceu a senha?** No Gerenciador de Arquivos, apague o arquivo `app/dados/senha.php`. No próximo acesso o app pede para criar uma nova. Os dados dos pacientes **não** são apagados.
+- Para trocar a senha: menu, depois **Trocar Senha**.
 
 ---
 
-## SUPORTE HOSTGATOR
-Chat 24h: https://www.hostgator.com.br/suporte
-Telefone: 0800 722 8092
+## Problemas comuns
+
+**A página dá erro 403 ou "Forbidden"**
+Confira se a pasta se chama `app` e se o `index.php` está dentro dela (e não dentro de `app/app`).
+
+**Aparece "Não foi possível carregar os dados"**
+Verifique a internet. Se continuar, confira se a pasta `app/dados` existe. Se não existir, crie a pasta pelo Gerenciador de Arquivos.
+
+**O site não abre e fica redirecionando**
+O SSL não está ativo. Volte ao Passo 2.
+
+**Abri no celular e no computador ao mesmo tempo**
+Pode. Se os dois editarem ao mesmo tempo, o app avisa e pergunta qual versão manter.
+
+---
+
+Suporte Hostgator: chat 24h em https://www.hostgator.com.br/suporte · 0800 722 8092

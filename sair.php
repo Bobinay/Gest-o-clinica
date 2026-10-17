@@ -1,7 +1,7 @@
 <?php
-session_start();
-session_unset();
+require __DIR__ . '/lib.php';
+iniciar_sessao();
+$_SESSION = [];
 session_destroy();
 header('Location: index.php');
 exit;
-?>
