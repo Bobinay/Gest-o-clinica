@@ -11,6 +11,7 @@ define('BACKUP_DIR',  DADOS_DIR . '/backups');       // 1 cópia por dia, últim
 define('TENTATIVAS',  DADOS_DIR . '/tentativas.json');
 define('INATIVIDADE', 8 * 3600);                     // logout após 8h sem uso
 define('AGENDA_TOKEN', DADOS_DIR . '/agenda_token.php'); // chave do Google Agenda (feed.php)
+define('DIGITAIS',    DADOS_DIR . '/digitais.json');  // aparelhos com entrada por digital (só chaves públicas)
 
 date_default_timezone_set('America/Sao_Paulo');
 
