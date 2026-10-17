@@ -24,6 +24,8 @@ AddType application/manifest+json .webmanifest
     RewriteEngine On
     # Bloqueia a pasta de dados (pacientes, senha, backups)
     RewriteRule ^dados(/|$) - [F,L]
+    # Bloqueia a pasta interna do git (quando instalado pelo cPanel)
+    RewriteRule (^|/)\.git(/|$) - [F,L]
     # Força HTTPS (cadeado). A Hostgator já fornece SSL grátis.
     RewriteCond %{HTTPS} off
     RewriteCond %{HTTP:X-Forwarded-Proto} !https
