@@ -421,11 +421,19 @@ function gcalUrl(p,date,time){
   return`https://calendar.google.com/calendar/r/eventedit?text=${encodeURIComponent('Sessão – '+p.name)}&dates=${d}T${t}00/${d}T${h}${t.slice(2)}00&details=${encodeURIComponent(`Paciente: ${p.name}\nValor: ${fmt(p.sessionValue)}\nTel: ${p.phone||''}${meet}\n\n— ${settings.name}`)}`;
 }
 
+// Sem emojis: o WhatsApp Desktop corrompe emojis vindos de links (viravam "�").
+// Usa o negrito do próprio WhatsApp (*texto*), que chega igual em qualquer aparelho.
 function waMsg(p,date,time){
-  const meet=p.meetLink?`\n\n🔗 Link da sessão:\n${p.meetLink}`:'';
-  return`Olá, ${p.name.split(' ')[0]}! 😊\n\nNossa próxima sessão:\n📅 ${fmtD(date)}\n⏰ ${time||'--'}${meet}\n\nAté lá!\n_${settings.name}_`;
+  const first=p.name.split(' ')[0];const nome=first.charAt(0).toUpperCase()+first.slice(1);
+  const dia=date?new Date(date+'T12:00').toLocaleDateString('pt-BR',{weekday:'long'}):'';
+  const meet=p.meetLink?`\n\n*Link da sessão:*\n${p.meetLink}`:'';
+  return`Olá, ${nome}!\n\nNossa próxima sessão:\n*Data:* ${fmtD(date)}${dia?` (${dia})`:''}\n*Horário:* ${time||'--'}${meet}\n\nAté lá!\n_${settings.name}_`;
 }
-function waUrl(p,date,time){return`https://wa.me/${(p.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(waMsg(p,date,time))}`;}
+// Número no formato internacional; acrescenta 55 (Brasil) se faltar
+function waPhone(ph){let d=String(ph||'').replace(/\D/g,'');if(d.length===10||d.length===11)d='55'+d;return d;}
+// api.whatsapp.com preserva acentos e símbolos melhor que o atalho wa.me
+function waLink(ph,text){return`https://api.whatsapp.com/send?phone=${waPhone(ph)}${text?`&text=${encodeURIComponent(text)}`:''}`;}
+function waUrl(p,date,time){return waLink(p.phone,waMsg(p,date,time));}
 function waCopy(p,date,time){
   const msg=waMsg(p,date,time);
   if(navigator.clipboard){navigator.clipboard.writeText(msg).then(()=>showToast('Mensagem copiada! Cole no WhatsApp.'));}
@@ -453,7 +461,7 @@ function openSchedModal(patId,sessId){
   const wrap=document.getElementById('sched-wa-wrap');
   const waHref=waUrl(p,s.date,s.time);
   if(!isMobile()){
-    wrap.innerHTML=`<a href="${waHref}" target="_blank" class="btn bp" style="width:100%;padding:13px;font-size:11px;display:flex" onclick="showToast('Abrindo WhatsApp Web…')">Abrir no WhatsApp Web</a><div style="font-size:10px;color:#3a5a4a;font-family:var(--sans);text-align:center;margin-top:6px">Emojis chegam certinhos no WhatsApp Web</div>`;
+    wrap.innerHTML=`<a href="${waHref}" target="_blank" class="btn bp" style="width:100%;padding:13px;font-size:11px;display:flex" onclick="showToast('Abrindo WhatsApp Web…')">Abrir no WhatsApp Web</a>`;
   } else {
     wrap.innerHTML=`<button class="btn bp" style="width:100%;padding:13px;font-size:11px;margin-bottom:8px" onclick="if(_sp&&_ss)waCopy(_sp,_ss.date,_ss.time)">Copiar Mensagem</button><div style="font-size:10px;color:#3a5a4a;font-family:var(--sans);margin-bottom:10px;text-align:center">Cole na conversa do paciente no WhatsApp</div><a href="${waHref}" target="_blank" class="btn bg" style="width:100%;padding:10px;font-size:10px;display:flex">Abrir WhatsApp</a>`;
   }
@@ -613,7 +621,7 @@ function rPatient(c,pt,ps,ta){
       <span class="ml">Notas Gerais do Caso</span>
       <textarea class="efta" style="margin-top:4px" placeholder="Impressões gerais, temas recorrentes…" onchange="updPat(${p.id},'notes',this.value)">${esc(p.notes||'')}</textarea>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <a href="https://wa.me/${(p.phone||'').replace(/\D/g,'')}" target="_blank" class="btn bgr bs">WhatsApp</a>
+        <a href="${waLink(p.phone)}" target="_blank" class="btn bgr bs">WhatsApp</a>
         <button class="btn bg bs" onclick="exportPDF(${p.id})">↓ PDF Prontuário</button>
       </div>
     </div>
@@ -797,7 +805,7 @@ function rWaitlist(c,ta){
         ${w.notes?`<div style="font-size:12px;color:#888;margin-top:3px">${esc(w.notes)}</div>`:''}
       </div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
-        <a href="https://wa.me/${(w.phone||'').replace(/\D/g,'')}" target="_blank" class="btn bgr bs">WhatsApp</a>
+        <a href="${waLink(w.phone)}" target="_blank" class="btn bgr bs">WhatsApp</a>
         <button class="btn bp bs" onclick="promoteWaitlist(${w.id})">→ Paciente</button>
         <button class="btn brd bs" onclick="removeWaitlist(${w.id})">✕</button>
       </div>
@@ -1080,7 +1088,7 @@ function chargeMsg(p){
 function chargeWA(pid){
   const p=gp(pid);if(!p)return;const msg=chargeMsg(p);
   if(isMobile()&&navigator.clipboard)navigator.clipboard.writeText(msg).catch(()=>{});
-  window.open(`https://wa.me/${(p.phone||'').replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
+  window.open(waLink(p.phone,msg),'_blank');
 }
 function confirmDel(id){document.getElementById('del-btn').onclick=()=>delPat(id);openModal('modal-del');}
 function delPat(id){patients=patients.filter(p=>p.id!==id);save();closeModal('modal-del');showToast('Paciente removido.','err');updateNav();go('dashboard');}
