@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Clínica · Thomaz Almeida</title>
+<title>Clínica</title>
 <!--CSRF-->
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#0a0a0a">
@@ -167,8 +167,8 @@ button{cursor:pointer}
 <div id="app">
   <aside class="sb" id="sb">
     <div class="sb-logo">
-      <div class="sb-name">Thomaz Almeida</div>
-      <div class="sb-sub">Psicanalista · Neurociência</div>
+      <div class="sb-name" id="sb-name">Clínica</div>
+      <div class="sb-sub" id="sb-sub"></div>
     </div>
     <nav>
       <div class="sb-sec">Sistema</div>
@@ -262,7 +262,7 @@ button{cursor:pointer}
 
 <script>
 // ── CONSTANTS ────────────────────────────────────────────────
-const TH={name:'Thomaz Almeida',whatsapp:'5538999095415'};
+// Nome e título do profissional vêm de Configurações (cada instalação tem o seu)
 const ST={
   agendada: {label:'Agendada', color:'#c8a96e',bg:'#26200e'},
   realizada:{label:'Realizada',color:'#6eaa82',bg:'#0e2018'},
@@ -284,7 +284,7 @@ let dashFilter='semana',dashFrom='',dashTo='';
 let finFilter='mes',finFrom='',finTo='';
 
 // Configurações do consultório (usadas no recibo)
-let settings={name:TH.name,cpf:'',title:'Psicanalista',city:'',address:'',pixKey:''};
+let settings={name:'',cpf:'',title:'Psicanalista',city:'',address:'',pixKey:''};
 
 // ── SALVAR NO SERVIDOR ───────────────────────────────────────
 // Os dados ficam no servidor (api.php) para celular e computador
@@ -472,7 +472,16 @@ function openSchedModal(patId,sessId){
 function toggleSb(){document.getElementById('sb').classList.toggle('open');document.getElementById('ov').classList.toggle('open');}
 function closeSb(){document.getElementById('sb').classList.remove('open');document.getElementById('ov').classList.remove('open');}
 
+// Nome do profissional no menu e na aba do navegador
+function updateBrand(){
+  const n=document.getElementById('sb-name'),t=document.getElementById('sb-sub');
+  if(n)n.textContent=settings.name||'Clínica';
+  if(t)t.textContent=settings.name?(settings.title||''):'Preencha seu nome em Configurações';
+  document.title=settings.name?`Clínica · ${settings.name}`:'Clínica';
+}
+
 function updateNav(){
+  updateBrand();
   document.querySelectorAll('.ni[data-v]').forEach(el=>el.classList.toggle('on',el.dataset.v===view&&!apid));
   const np=document.getElementById('nav-pats');
   if(!patients.length){np.innerHTML='';return;}
@@ -1155,7 +1164,7 @@ function receipt(pid,from,to){
 }
 
 // ── CONFIGURAÇÕES ─────────────────────────────────────────────
-function updSetting(k,v){settings[k]=v;save();}
+function updSetting(k,v){settings[k]=v;save();if(k==='name'||k==='title')updateBrand();}
 function rSettings(c){
   const f=(k,label,ph='',type='text')=>`<div class="fi"><label>${label}</label><input type="${type}" class="inp" value="${esc(settings[k]||'')}" placeholder="${ph}" onchange="updSetting('${k}',this.value.trim())"></div>`;
   c.innerHTML=`<div class="card" style="max-width:560px;margin-bottom:14px">

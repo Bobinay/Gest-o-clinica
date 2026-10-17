@@ -42,6 +42,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 $csrf = csrf_token();
+
+// Nome do profissional (de Configurações) para o cabeçalho; só o nome, nada de pacientes
+$nome = 'Sistema Clínico';
+if (file_exists(DATA_FILE)) {
+    $d = json_decode((string)file_get_contents(DATA_FILE), true);
+    $n = trim((string)($d['data']['settings']['name'] ?? ''));
+    if ($n !== '') $nome = $n;
+}
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -80,7 +88,7 @@ input[type=password]:focus{border-color:#c8a96e88}
 <body>
 <div class="wrap">
   <div class="logo">
-    <h1>Thomaz Almeida</h1>
+    <h1><?= e($nome) ?></h1>
     <p>Sistema Clínico · Acesso Restrito</p>
   </div>
   <div class="card">
