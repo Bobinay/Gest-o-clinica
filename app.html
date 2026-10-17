@@ -573,6 +573,7 @@ function rDash(c){
 
   c.innerHTML=`
   ${lembretesHtml()}
+  ${pacotesHtml()}
   ${bdayHtml}
   <div class="g4" style="margin-bottom:14px">
     ${[['Pacientes',ativos().length,'var(--gold)'],['Espera',waitlist.length,'var(--blue)'],['Recebido',fmt(fin.tP),'var(--green)'],['Pendente',fmt(fin.tPend),fin.tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
@@ -743,10 +744,12 @@ function rPatient(c,pt,ps,ta){
   else if(patTab==='sessoes'){
     const sessHtml=(p.sessions||[]).slice().reverse().map(s=>{
       const cfg=ST[s.status]||{};
-      const pay=isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
-        <div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:'✗ Pendente'}</div>
-        ${s.paid?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updSessField(${p.id},${s.id},'payMethod',this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
-        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${s.paid?'Desmarcar':'Marcar Pago'}</button>`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
+      const pk=s.pkg?pacoteDe(p,s.pkg):null;
+      const pkB=pk?`<div style="font-size:10px;color:var(--green);font-family:var(--sans);margin-bottom:6px" title="Pagamento antecipado de ${fmtD(pk.from)} a ${fmtD(pk.to)}">📦 Pago no pacote até ${fmtD(pk.to).slice(0,5)}</div>`:'';
+      const pay=pk&&!isBill(s)?pkB:isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
+        ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:'✗ Pendente'}</div>`}
+        ${s.paid&&!pk?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updSessField(${p.id},${s.id},'payMethod',this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
+        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':'Marcar Pago'}</button>`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
       return`<div class="sr"><div class="sg">
         <div class="sd" id="sess-${s.id}">
           <input type="date" class="inp sdate" value="${s.date}" title="Data da sessão (pode corrigir)" onchange="updSessWhen(${p.id},${s.id},'date',this.value)">
@@ -1135,8 +1138,8 @@ function saveNewSess(){
   const p=gp(apid);if(!p)return;
   const sess={id:Date.now(),date,time,status,value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:document.getElementById('ns-mood').value,themes:document.getElementById('ns-themes').value.trim(),notes:document.getElementById('ns-notes').value.trim()};
   if(!p.sessions)p.sessions=[];
-  p.sessions.push(sess);sortSess(p);
-  save();showToast('Sessão salva!');
+  p.sessions.push(sess);sortSess(p);syncPacotes(p);
+  save();showToast(sess.pkg?'Sessão salva (já paga no pacote).':'Sessão salva!');
   go('patient',p.id,'sessoes');
   if(status==='agendada')setTimeout(()=>openSchedModal(p.id,sess.id),200);
 }
@@ -1149,15 +1152,15 @@ function sortSess(p){(p.sessions||[]).sort((a,b)=>a.date.localeCompare(b.date)||
 // Corrige data/horário de uma sessão já registrada
 function updSessWhen(pid,sid,field,value){
   const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s||!value)return;
-  s[field]=value;sortSess(p);save();
+  s[field]=value;sortSess(p);syncPacotes(p);save();
   showToast(field==='date'?`Data alterada para ${fmtD(value)}.`:`Horário alterado para ${value}.`);
   go('patient',pid,'sessoes');flashSess(sid);
 }
 function flashSess(sid){setTimeout(()=>{const el=document.getElementById('sess-'+sid);const row=el&&el.closest('.sr');if(row){row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('flash');}},120);}
-function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.status=status;save();go('patient',pid,'sessoes');}
+function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.status=status;syncPacotes(p);save();go('patient',pid,'sessoes');}
 function updSessField(pid,sid,field,value){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s[field]=value;save();}
 function markPaid(p,s,paid,method){s.paid=paid;s.paidAmount=paid?sv(p,s):0;s.paidDate=paid?td():'';if(paid&&method)s.payMethod=method;if(!paid)s.payMethod='';}
-function togglePaid(pid,sid){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;if(s.value==null)s.value=sv(p,s);markPaid(p,s,!s.paid,settings.defaultPay||'');save();go('patient',pid,'sessoes');}
+function togglePaid(pid,sid){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;if(s.pkg&&s.paid){if(!confirm('Esta sessão está paga dentro de um pacote. Tirar ela do pacote e marcar como não paga?'))return;s.pkgOut=true;s.pkg=null;}if(s.value==null)s.value=sv(p,s);markPaid(p,s,!s.paid,settings.defaultPay||'');save();go('patient',pid,'sessoes');}
 function updSessValue(pid,sid,v){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.value=parseFloat(v)||0;if(s.paid)s.paidAmount=s.value;save();updateNav();}
 // Marca todas as sessões em aberto de um paciente como pagas (ex.: pagamento mensal)
 function payAll(pid){
@@ -1238,8 +1241,8 @@ function extenso(v){
 
 function receipt(pid,from,to){
   const p=gp(pid);if(!p)return;
-  const list=(p.sessions||[]).filter(s=>isBill(s)&&s.paid&&s.date>=from&&s.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
-  if(!list.length){showToast('Nenhuma sessão paga neste período.','err');return;}
+  const list=(p.sessions||[]).filter(s=>isBill(s)&&s.paid&&!s.pkg&&s.date>=from&&s.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!list.length){showToast((p.sessions||[]).some(s=>s.pkg&&s.date>=from&&s.date<=to)?'As sessões deste período estão num pacote: use "Recibo do pacote" em Combinados.':'Nenhuma sessão paga neste período.','err');return;}
   const total=list.reduce((a,s)=>a+Number(s.paidAmount||sv(p,s)),0);
   if(!settings.cpf||!p.cpf)showToast('Dica: preencha seu CPF (Configurações) e o do paciente para o recibo ficar completo.');
   const today=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
@@ -1516,10 +1519,104 @@ function gerarSessoes(pids,mes){
       (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});
       criadas++;
     }
-    sortSess(p);
+    sortSess(p);syncPacotes(p);
   });
   save();render();
   showToast(criadas?`${criadas} sessão(ões) criada(s)${jaTinha?` · ${jaTinha} dia(s) já tinham sessão`:''}. Feriados ou férias: cancele na lista.`:'Nenhuma sessão nova (já geradas, ou sem horário fixo).');
+}
+
+// ── PACOTES (pagamento antecipado) ─────────────────────────────
+// Um pacote cobre um período: toda sessão nele fica paga automaticamente,
+// inclusive as criadas depois. Ex.: pago dia 14/10 → válido até 13/11.
+function pacoteDe(p,id){return(p.pacotes||[]).find(k=>k.id===id)||null;}
+function pacoteCobrindo(p,date){return(p.pacotes||[]).find(k=>date>=k.from&&date<=k.to)||null;}
+// Fim do período: véspera do mesmo dia no mês seguinte (14/10 → 13/11).
+// Se o dia não existe no mês seguinte (ex.: 31/01), vai até o último dia dele.
+function fimPacote(ini){const d=new Date(ini+'T12:00'),dia=d.getDate();d.setMonth(d.getMonth()+1);if(d.getDate()!==dia){d.setDate(0);return isoD(d);}d.setDate(d.getDate()-1);return isoD(d);}
+function syncPacotes(p){
+  (p.sessions||[]).forEach(s=>{
+    if(s.status==='cancelada'||s.pkgOut){if(s.pkg){s.pkg=null;s.paid=false;s.paidAmount=0;s.paidDate='';s.payMethod='';}return;}
+    const k=pacoteCobrindo(p,s.date);
+    if(k){if(s.value==null)s.value=sv(p,s);s.pkg=k.id;s.paid=true;s.paidAmount=sv(p,s);s.paidDate=k.date;s.payMethod=k.method||'';}
+    else if(s.pkg){s.pkg=null;s.paid=false;s.paidAmount=0;s.paidDate='';s.payMethod='';}
+  });
+}
+// Quantas sessões o horário fixo prevê no período (para sugerir o valor)
+function sessoesPrevistas(p,from,to){
+  const sch=p.schedule||{};let n=0;
+  for(let d=new Date(from+'T12:00');isoD(d)<=to;d.setDate(d.getDate()+1))if(sch[d.getDay()])n++;
+  return n;
+}
+function pkSugerir(pid){
+  const p=gp(pid),g=id=>document.getElementById(id);if(!p||!g('pk-date'))return;
+  const ini=g('pk-date').value;if(!ini)return;
+  if(!g('pk-to').dataset.manual)g('pk-to').value=fimPacote(ini);
+  const n=sessoesPrevistas(p,ini,g('pk-to').value);
+  g('pk-info').textContent=n?`${n} sessão(ões) previstas pelo horário fixo · ${fmt(n*Number(p.sessionValue||0))}`:'Sem horário fixo: informe o valor combinado.';
+  if(!g('pk-val').dataset.manual&&n)g('pk-val').value=(n*Number(p.sessionValue||0)).toFixed(2);
+}
+function addPacote(pid){
+  const p=gp(pid),g=id=>document.getElementById(id);if(!p)return;
+  const date=g('pk-date').value,to=g('pk-to').value,amount=parseFloat(g('pk-val').value)||0;
+  if(!date||!to||to<date){showToast('Confira as datas do pacote.','err');return;}
+  const choque=(p.pacotes||[]).find(k=>date<=k.to&&to>=k.from);
+  if(choque&&!confirm(`Já existe um pacote de ${fmtD(choque.from)} a ${fmtD(choque.to)} que se sobrepõe a este. Registrar mesmo assim?`))return;
+  const k={id:novoId(),date,from:date,to,amount,method:g('pk-met').value};
+  (p.pacotes=p.pacotes||[]).push(k);
+  // Já agenda as sessões do período pelo horário fixo (sem duplicar)
+  let criadas=0;
+  if(g('pk-gerar')?.checked&&p.schedule){
+    for(let d=new Date(Math.max(new Date(date+'T12:00'),new Date(td()+'T12:00')));isoD(d)<=to;d.setDate(d.getDate()+1)){
+      const t=p.schedule[d.getDay()],iso=isoD(d);if(!t||(p.sessions||[]).some(s=>s.date===iso))continue;
+      (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});criadas++;
+    }
+    sortSess(p);
+  }
+  syncPacotes(p);save();updateNav();go('patient',pid,'combinados');
+  const cob=(p.sessions||[]).filter(s=>s.pkg===k.id).length;
+  showToast(`Pacote registrado até ${fmtD(to)}: ${cob} sessão(ões) marcadas como pagas${criadas?` (${criadas} agendada(s) agora)`:''}.`);
+}
+function delPacote(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  if(!confirm(`Excluir o pacote de ${fmtD(k.from)} a ${fmtD(k.to)}?\n\nAs sessões dele voltam a ficar como não pagas.`))return;
+  p.pacotes=p.pacotes.filter(x=>x.id!==kid);syncPacotes(p);save();updateNav();go('patient',pid,'combinados');showToast('Pacote excluído.');
+}
+function reciboPacote(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  const ses=(p.sessions||[]).filter(s=>s.pkg===kid).sort((a,b)=>a.date.localeCompare(b.date));
+  const today=new Date().toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'});
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo – ${esc(p.name)}</title><style>
+  body{font-family:Georgia,serif;max-width:720px;margin:0 auto;padding:48px 40px;color:#111;line-height:1.7}
+  h1{font-weight:400;letter-spacing:.2em;font-size:22px;text-align:center;margin:0 0 4px}
+  .val{font-size:20px;margin:24px 0;border:1px solid #ccc;display:inline-block;padding:6px 16px;float:right}.clear{clear:both}p{font-size:15px;text-align:justify}
+  .small{font-size:12px;color:#555}.sig{margin-top:70px;text-align:center}.sig .ln{border-top:1px solid #333;width:320px;margin:0 auto 6px}@media print{body{padding:20px}}</style></head><body>
+  <h1>RECIBO</h1><div class="small" style="text-align:center">${esc(settings.name)} · ${esc(settings.title)}</div>
+  <div class="val">${fmt(k.amount)}</div><div class="clear"></div>
+  <p>Recebi de <strong>${esc(p.name)}</strong>${p.cpf?`, CPF ${esc(p.cpf)}`:''}, em ${fmtD(k.date)}, a importância de <strong>${fmt(k.amount)}</strong> (${extenso(k.amount)}), referente ao pagamento antecipado das sessões de psicanálise do período de ${fmtD(k.from)} a ${fmtD(k.to)}${ses.length?` (${ses.length} sessão(ões) agendada(s): ${ses.map(s=>fmtD(s.date).slice(0,5)).join(', ')})`:''}.</p>
+  <p>Para clareza, firmo o presente.</p>
+  <p style="text-align:right">${esc(settings.city||'')}${settings.city?', ':''}${today}.</p>
+  <div class="sig"><div class="ln"></div>${esc(settings.name)}<br><span class="small">${esc(settings.title)}${settings.regProf?` · ${esc(settings.regProf)}`:''}${settings.cpf?` · CPF ${esc(settings.cpf)}`:''}</span></div>
+  </body></html>`;
+  const w=window.open('','_blank');if(!w){showToast('Permita pop-ups para gerar o recibo.','err');return;}
+  w.document.write(html);w.document.close();setTimeout(()=>w.print(),300);
+}
+// Pacotes vencendo nos próximos 5 dias (ou vencidos há até 3 dias, sem renovação)
+function pacotesAVencer(){
+  const lim=diasAtras(-5),ini=diasAtras(3),out=[];
+  ativos().forEach(p=>{
+    const ks=(p.pacotes||[]).slice().sort((a,b)=>b.to.localeCompare(a.to));const k=ks[0];
+    if(k&&k.to>=ini&&k.to<=lim)out.push({p,k});
+  });
+  return out.sort((a,b)=>a.k.to.localeCompare(b.k.to));
+}
+function pacotesHtml(){
+  const l=pacotesAVencer();if(!l.length)return'';
+  return`<div class="card" style="margin-bottom:14px;border-color:#3a2a10">
+    <span class="ml" style="color:var(--gold);margin-bottom:6px">📦 Pacotes vencendo · combinar renovação</span>
+    ${l.map(({p,k})=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--bd);flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--cream);cursor:pointer" onclick="go('patient',${p.id},'combinados')">${esc(p.name)} <span style="font-size:11px;color:var(--gold);font-family:var(--sans)">${k.to<td()?'venceu':'vence'} ${fmtD(k.to).slice(0,5)}</span></span>
+      <button class="btn bp bs" onclick="go('patient',${p.id},'combinados')">Registrar renovação</button></div>`).join('')}
+  </div>`;
 }
 
 // Aba "Combinados" do paciente
@@ -1528,7 +1625,27 @@ function rCombinados(p){
   const linhas=[1,2,3,4,5,6,0].map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:4px 0;font-family:var(--sans);font-size:12px;color:#bbb">
       <label style="display:flex;align-items:center;gap:8px;width:110px;cursor:pointer"><input type="checkbox" ${sch[d]?'checked':''} onchange="setSched(${p.id},${d},this.checked?(document.getElementById('sch-${d}').value||'10:00'):'')">${DIAS[d]}</label>
       <input type="time" class="inp" id="sch-${d}" style="width:110px;padding:4px 8px;font-size:12px" value="${sch[d]||''}" onchange="if(this.value)setSched(${p.id},${d},this.value)"></div>`).join('');
-  return`<div class="g2">
+  const pks=(p.pacotes||[]).slice().sort((a,b)=>b.from.localeCompare(a.from));
+  const ativo=pacoteCobrindo(p,td());
+  const pacoteCard=`<div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="ml" style="margin-bottom:0">📦 Pagamento antecipado (pacote)</span>
+      ${ativo?`<span style="font-size:12px;color:var(--green);font-family:var(--sans)">Pacote ativo até ${fmtD(ativo.to)}</span>`:''}</div>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:10px">Quando o paciente paga o mês adiantado: todas as sessões do período ficam pagas sozinhas, inclusive as criadas depois.</div>
+    <div class="g4 fg" style="gap:10px;align-items:end">
+      <div class="fi"><label>Pago em</label><input type="date" class="inp" id="pk-date" value="${td()}" onchange="pkSugerir(${p.id})"></div>
+      <div class="fi"><label>Válido até</label><input type="date" class="inp" id="pk-to" value="${fimPacote(td())}" onchange="this.dataset.manual='1';pkSugerir(${p.id})"></div>
+      <div class="fi"><label>Valor recebido (R$)</label><input type="number" min="0" step="0.01" class="inp" id="pk-val" oninput="this.dataset.manual='1'"></div>
+      <div class="fi"><label>Forma</label><select class="sel" id="pk-met">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select></div>
+    </div>
+    <div id="pk-info" style="font-size:11px;color:var(--gold);font-family:var(--sans);margin:-4px 0 8px"></div>
+    ${p.schedule&&Object.keys(p.schedule).length?`<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;font-family:var(--sans);margin-bottom:10px"><input type="checkbox" id="pk-gerar" checked> Já agendar as sessões do período pelo horário fixo (${esc(horariosTxt(p))})</label>`:`<div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-bottom:10px">Dica: defina o horário fixo abaixo para o app já agendar as sessões do pacote.</div>`}
+    <button class="btn bp bs" onclick="addPacote(${p.id})">Registrar pacote</button>
+    ${pks.length?`<div class="divl"></div>${pks.map(k=>{const n=(p.sessions||[]).filter(s=>s.pkg===k.id).length;return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
+      <span style="color:${k===ativo?'var(--green)':'#bbb'}">${fmtD(k.from)} → ${fmtD(k.to)} · ${fmt(k.amount)}${k.method?' · '+esc(k.method):''} · ${n} sessão(ões)</span>
+      <span style="display:flex;gap:6px"><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
+  </div>`;
+  setTimeout(()=>pkSugerir(p.id),0);
+  return`${pacoteCard}<div class="g2">
     <div class="card">
       <span class="ml">Horário fixo</span>
       <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:8px">Marque os dias e horários das sessões. Depois gere as sessões do mês de uma vez (também na Agenda).</div>
@@ -1633,7 +1750,9 @@ let caixaAno=new Date().getFullYear(),caixaMes=null;
 // Recebimentos: sessões pagas, pela data do pagamento
 function recebimentos(){
   const r=[];
-  patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),p,s})));
+  patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&!s.pkg&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),p,s})));
+  // Pacotes entram pelo valor realmente recebido, na data do pagamento
+  patients.forEach(p=>(p.pacotes||[]).filter(k=>Number(k.amount)>0).forEach(k=>r.push({data:k.date,valor:Number(k.amount),p,s:{date:k.from,payMethod:k.method},pacote:k})));
   return r.sort((a,b)=>a.data.localeCompare(b.data));
 }
 function rCaixa(c){
@@ -1650,7 +1769,7 @@ function rCaixa(c){
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="ml" style="margin-bottom:0">Detalhe de ${nomeM}</span>
         <div style="display:flex;gap:6px"><button class="btn bgo bs" onclick="csvCarne('${caixaMes}')">↓ Planilha do mês (carnê-leão)</button><button class="btn bg bs" onclick="caixaMes=null;rCaixa(document.getElementById('cnt'))">Fechar</button></div></div>
       <div class="ml" style="color:var(--green)">Recebimentos (${r.length}) · ${fmt(r.reduce((a,x)=>a+x.valor,0))}</div>
-      ${r.length?r.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:#ccc">${fmtD(x.data)} · ${esc(x.p.name)}${x.p.cpf?' · CPF '+esc(x.p.cpf):' · <span style="color:var(--red)">sem CPF</span>'}</span><span style="color:var(--green)">${fmt(x.valor)}${x.s.payMethod?' · '+esc(x.s.payMethod):''}</span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhum recebimento.</div>'}
+      ${r.length?r.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:#ccc">${fmtD(x.data)} · ${esc(x.p.name)}${x.pacote?' · 📦 pacote até '+fmtD(x.pacote.to).slice(0,5):''}${x.p.cpf?' · CPF '+esc(x.p.cpf):' · <span style="color:var(--red)">sem CPF</span>'}</span><span style="color:var(--green)">${fmt(x.valor)}${x.s.payMethod?' · '+esc(x.s.payMethod):''}</span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhum recebimento.</div>'}
       <div class="ml" style="color:var(--red);margin-top:14px">Despesas (${d.length}) · ${fmt(d.reduce((a,x)=>a+Number(x.value||0),0))}</div>
       ${d.length?d.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;align-items:center"><span style="color:#ccc">${fmtD(x.date)} · ${esc(x.desc||x.cat)} <span style="color:var(--dim)">(${esc(x.cat)})</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:var(--red)">${fmt(x.value)}</span><button class="btn brd bs" style="padding:2px 7px" onclick="delDespesa(${x.id})">✕</button></span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhuma despesa.</div>'}
     </div>`;
@@ -1698,7 +1817,7 @@ function csvCarne(mes){
   const q=v=>String(v??'').replace(/"/g,'""');
   const r=recebimentos().filter(x=>x.data.startsWith(mes)),d=despesas.filter(x=>(x.date||'').startsWith(mes));
   let csv=`Livro-caixa ${mes}\n\nRECEBIMENTOS\nData pagamento,Paciente (pagador),CPF,Data da sessao,Forma,Valor\n`;
-  r.forEach(x=>{csv+=`"${fmtD(x.data)}","${q(x.p.name)}","${q(x.p.cpf)}","${fmtD(x.s.date)}","${q(x.s.payMethod)}","${x.valor.toFixed(2).replace('.',',')}"\n`;});
+  r.forEach(x=>{csv+=`"${fmtD(x.data)}","${q(x.p.name)}","${q(x.p.cpf)}","${x.pacote?'Pacote '+fmtD(x.pacote.from)+' a '+fmtD(x.pacote.to):fmtD(x.s.date)}","${q(x.s.payMethod)}","${x.valor.toFixed(2).replace('.',',')}"\n`;});
   csv+=`"","","","","Total","${r.reduce((a,x)=>a+x.valor,0).toFixed(2).replace('.',',')}"\n\nDESPESAS\nData,Categoria,Descricao,Valor\n`;
   d.forEach(x=>{csv+=`"${fmtD(x.date)}","${q(x.cat)}","${q(x.desc)}","${Number(x.value).toFixed(2).replace('.',',')}"\n`;});
   csv+=`"","","Total","${d.reduce((a,x)=>a+Number(x.value||0),0).toFixed(2).replace('.',',')}"\n`;
