@@ -288,7 +288,7 @@ const ST={
 // Sessões que geram cobrança: realizadas e faltas cobradas (prática comum na clínica psicanalítica)
 const BILL=['realizada','falta_cobrada'];
 const isBill=s=>BILL.includes(s.status);
-const PAYS=['Pix','Dinheiro','Transferência','Cartão','Outro'];
+const PAYS=['Pix','Dinheiro','Transferência','Cartão','Mercado Pago','Outro'];
 const FREQS=['Semanal','Duas vezes/semana','Quinzenal','Mensal','Intensivo'];
 const ORIENTATIONS=['Psicanalítica','Lacaniana','Freudiana','Junguiana','Winnicottiana','Integrativa','Outra'];
 const MOODS=['Estável','Ansioso','Deprimido','Agitado','Resistente','Elaborativo','Em crise','Indiferente'];
@@ -390,10 +390,25 @@ function daysUntilBirthday(birth){if(!birth)return null;const b=new Date(birth),
 
 // Valor de cada sessão fica gravado nela: reajustar o valor do paciente não altera o passado
 const sv=(p,s)=>Number(s.value??p.sessionValue??0);
-function sumBill(p,sess){const b=sess.filter(isBill);const total=b.reduce((a,s)=>a+sv(p,s),0);const paid=b.reduce((a,s)=>a+Number(s.paidAmount||0),0);return{total,paid,pending:total-paid,count:b.length};}
-function bal(p){const r=sumBill(p,p.sessions||[]);r.count=(p.sessions||[]).filter(s=>s.status==='realizada').length;return r;}
+// Taxa da maquininha/Mercado Pago por forma de pagamento (Configurações) → valor líquido que cai na conta
+const taxaDe=m=>Number((settings.taxas||{})[m]||0);
+const liquidoDe=(v,m)=>Math.round(Number(v||0)*(1-taxaDe(m)/100)*100)/100;
+const netS=s=>Number(s.paidNet??s.paidAmount??0);
+const netK=k=>Number(k.net??k.amount??0);
+// Sessões avulsas somam pelo valor da sessão; sessões de pacote NÃO entram aqui
+// (o pacote conta pelo valor combinado, na data do pagamento — ver finPac)
+function sumBill(p,sess){const b=sess.filter(s=>isBill(s)&&!s.pkg&&!s.free);const total=b.reduce((a,s)=>a+sv(p,s),0);const paid=b.reduce((a,s)=>a+Number(s.paidAmount||0),0);const net=b.filter(s=>s.paid).reduce((a,s)=>a+netS(s),0);return{total,paid,net,pending:total-paid,count:b.length};}
+// Pacotes pagos no período (bruto e líquido)
+function finPac(p,from,to){const ks=(p.pacotes||[]).filter(k=>k.date>=from&&k.date<=to);return{total:ks.reduce((a,k)=>a+Number(k.amount||0),0),net:ks.reduce((a,k)=>a+netK(k),0),n:ks.length};}
+// Resumo financeiro de um paciente num período: avulsas pela data da sessão + pacotes pela data do pagamento
+function finPeriodo(p,from,to){
+  const a=sumBill(p,(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to)),k=finPac(p,from,to);
+  const nSes=(p.sessions||[]).filter(s=>isBill(s)&&s.date>=from&&s.date<=to).length;
+  return{total:a.total+k.total,paid:a.paid+k.total,net:a.net+k.net,pending:a.pending,count:nSes,pacotes:k.n};
+}
+function bal(p){const r=finPeriodo(p,'0000-00-00','9999-12-31');r.count=(p.sessions||[]).filter(s=>s.status==='realizada').length;return r;}
 // Sessões cobráveis ainda não pagas (até hoje)
-function unpaid(p){return(p.sessions||[]).filter(s=>isBill(s)&&!s.paid&&s.date<=td()).sort((a,b)=>a.date.localeCompare(b.date));}
+function unpaid(p){return(p.sessions||[]).filter(s=>isBill(s)&&!s.paid&&!s.free&&s.date<=td()).sort((a,b)=>a.date.localeCompare(b.date));}
 
 function upcoming(){const t=td(),a=[];patients.forEach(p=>(p.sessions||[]).filter(s=>s.date>=t&&s.status==='agendada').forEach(s=>a.push({...s,patient:p})));return a.sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));}
 
@@ -417,7 +432,12 @@ function mData(from,to){
   patients.forEach(p=>(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to).forEach(s=>{
     const k=(s.date||'').slice(0,7);if(!k)return;
     if(!map[k])map[k]={month:k,gerado:0,recebido:0};
-    if(isBill(s)){map[k].gerado+=sv(p,s);map[k].recebido+=Number(s.paidAmount||0);}
+    if(isBill(s)&&!s.pkg&&!s.free){map[k].gerado+=sv(p,s);map[k].recebido+=Number(s.paidAmount||0);}
+  }));
+  // Pacotes entram no mês em que foram pagos
+  patients.forEach(p=>(p.pacotes||[]).filter(x=>x.date>=from&&x.date<=to).forEach(x=>{
+    const k=x.date.slice(0,7);if(!map[k])map[k]={month:k,gerado:0,recebido:0};
+    map[k].gerado+=Number(x.amount||0);map[k].recebido+=Number(x.amount||0);
   }));
   return Object.values(map).sort((a,b)=>a.month.localeCompare(b.month)).map(d=>({...d,label:new Date(d.month+'-15').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})}));
 }
@@ -544,6 +564,8 @@ function render(){
 // ── DASHBOARD ────────────────────────────────────────────────
 function rDash(c){
   const fin=finSum();
+  const mesAt=td().slice(0,7),mesNm=new Date(mesAt+'-15T12:00').toLocaleDateString('pt-BR',{month:'long'});
+  const recMes=recebimentos().filter(x=>x.data.startsWith(mesAt)).reduce((a,x)=>a+x.liquido,0);
   const range=getDateRange(dashFilter,dashFrom,dashTo);
   const {from,to}=range;
   const allSess=[];
@@ -576,7 +598,7 @@ function rDash(c){
   ${pacotesHtml()}
   ${bdayHtml}
   <div class="g4" style="margin-bottom:14px">
-    ${[['Pacientes',ativos().length,'var(--gold)'],['Espera',waitlist.length,'var(--blue)'],['Recebido',fmt(fin.tP),'var(--green)'],['Pendente',fmt(fin.tPend),fin.tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
+    ${[['Pacientes',ativos().length,'var(--gold)'],['Espera',waitlist.length,'var(--blue)'],['Na conta em '+mesNm,fmt(recMes),'var(--green)'],['Pendente',fmt(fin.tPend),fin.tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
   </div>
   <div class="g2">
     <div class="card">
@@ -586,7 +608,7 @@ function rDash(c){
         return`<div class="pc" style="border-left-color:${p.color}" onclick="go('patient',${p.id})">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
             <div><div style="font-size:14px;color:var(--cream)">${esc(p.name)}</div>
-            <div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-top:2px">${esc(p.frequency)} · ${fmt(p.sessionValue)} · ${b.count} sessões${rate!==null?' · '+rate+'% pres.':''}</div></div>
+            <div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-top:2px">${esc(p.frequency)} · ${p.packageValue?'mensal '+fmt(p.packageValue):fmt(p.sessionValue)} · ${b.count} sessões${rate!==null?' · '+rate+'% pres.':''}</div></div>
             <div style="text-align:right;flex-shrink:0"><div style="font-size:11px;color:${b.pending>0?'var(--red)':'var(--green)'};font-family:var(--sans)">${b.pending>0?fmt(b.pending)+' pend.':'Em dia'}</div></div>
           </div>
         </div>`;}).join('')}
@@ -746,10 +768,13 @@ function rPatient(c,pt,ps,ta){
       const cfg=ST[s.status]||{};
       const pk=s.pkg?pacoteDe(p,s.pkg):null;
       const pkB=pk?`<div style="font-size:10px;color:var(--green);font-family:var(--sans);margin-bottom:6px" title="Pagamento antecipado de ${fmtD(pk.from)} a ${fmtD(pk.to)}">📦 Pago no pacote até ${fmtD(pk.to).slice(0,5)}</div>`:'';
-      const pay=pk&&!isBill(s)?pkB:isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
+      const fechou=!s.paid&&!pk&&isBill(s)&&mesFechou(p,s);
+      const freeBtn=`<button class="btn ${fechou?'bp':'bg'} bs" style="margin-top:5px" title="Sessão sobressalente: realizada, mas sem cobrança" onclick="setSemCusto(${p.id},${s.id},true)">${fechou?'Mês fechou · sem custo?':'Sem custo'}</button>`;
+      const pay=s.free&&isBill(s)?`<div style="font-size:11px;color:var(--purple);font-family:var(--sans);margin-bottom:6px" title="Realizada, mas fora do faturamento">🎁 Sem custo<br><span style="font-size:10px;color:var(--dim)">(sobressalente do mês)</span></div><button class="btn bg bs" onclick="setSemCusto(${p.id},${s.id},false)">Cobrar normalmente</button>`:pk&&!isBill(s)?pkB:isBill(s)?`<div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:3px"><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">R$</span><input class="inp" type="number" min="0" step="0.01" style="width:82px;padding:3px 6px;font-size:13px;text-align:right" value="${sv(p,s)}" title="Valor desta sessão" onchange="updSessValue(${p.id},${s.id},this.value)"></div>
         ${pk?pkB:`<div style="font-size:10px;color:${s.paid?'var(--green)':'var(--red)'};font-family:var(--sans);margin-bottom:6px">${s.paid?`✓ Pago${s.paidDate?' em '+fmtD(s.paidDate).slice(0,5):''}`:'✗ Pendente'}</div>`}
-        ${s.paid&&!pk?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updSessField(${p.id},${s.id},'payMethod',this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
-        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':'Marcar Pago'}</button>`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
+        ${s.paid&&!pk?`<div style="font-size:10px;font-family:var(--sans);margin-bottom:5px;color:var(--dim);cursor:pointer" title="Toque para corrigir o valor que entrou na conta" onclick="editLiquido(${p.id},${s.id})">na conta: <span style="color:var(--green);text-decoration:underline dotted">${fmt(netS(s))}</span></div>`:''}
+        ${s.paid&&!pk?`<select class="sel" style="width:auto;padding:3px 6px;font-size:10px;margin-bottom:6px" onchange="updPayMethod(${p.id},${s.id},this.value)"><option value="">Forma…</option>${PAYS.map(m=>`<option${s.payMethod===m?' selected':''}>${m}</option>`).join('')}</select><br>`:''}
+        <button class="btn ${s.paid?'bg':'bgr'} bs" onclick="togglePaid(${p.id},${s.id})">${pk?'Tirar do pacote':s.paid?'Desmarcar':'Marcar Pago'}</button>${!s.paid&&!pk?`<br>${freeBtn}`:''}`:'<span style="font-size:11px;color:var(--dim);font-family:var(--sans)">—</span>';
       return`<div class="sr"><div class="sg">
         <div class="sd" id="sess-${s.id}">
           <input type="date" class="inp sdate" value="${s.date}" title="Data da sessão (pode corrigir)" onchange="updSessWhen(${p.id},${s.id},'date',this.value)">
@@ -906,7 +931,7 @@ function rFin(c){
   const range=getDateRange(finFilter,finFrom,finTo);
   const{from,to}=range;
   let tR=0,tP=0,tPend=0;
-  patients.forEach(p=>{const b=sumBill(p,(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to));tR+=b.total;tP+=b.paid;tPend+=b.pending;});
+  let tN=0;patients.forEach(p=>{const b=finPeriodo(p,from,to);tR+=b.total;tP+=b.paid;tN+=b.net;tPend+=b.pending;});
   // Em aberto: todas as sessões cobráveis não pagas, de qualquer mês
   const debtors=patients.map(p=>{const l=unpaid(p);return{p,l,total:l.reduce((a,s)=>a+sv(p,s),0)};}).filter(d=>d.l.length).sort((a,b)=>b.total-a.total);
   const debtTotal=debtors.reduce((a,d)=>a+d.total,0);
@@ -944,20 +969,20 @@ function rFin(c){
     </div>
     ${customInputs}
   </div>
-  <div class="g3" style="margin-bottom:14px">
-    ${[['Gerado',fmt(tR),'var(--dim)'],['Recebido',fmt(tP),'var(--green)'],['Pendente',fmt(tPend),tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
+  <div class="g4" style="margin-bottom:14px">
+    ${[['Gerado',fmt(tR),'var(--dim)'],['Recebido (bruto)',fmt(tP),'var(--green)'],['Líquido na conta',fmt(tN),'var(--green)'],['Pendente',fmt(tPend),tPend>0?'var(--red)':'var(--green)']].map(([l,v,col])=>`<div class="card"><span class="ml">${l}</span><div class="mv" style="color:${col}">${v}</div></div>`).join('')}
   </div>
   ${debtHtml}
   <div class="card" style="margin-bottom:14px"><span class="ml" style="display:block;margin-bottom:11px">Evolução Mensal</span><div id="chart" style="width:100%;height:170px">${md.length===0?'<div style="color:var(--dim);font-size:12px;font-family:var(--sans);padding:60px 0;text-align:center">Sem dados no período.</div>':''}</div></div>
   <div class="card"><span class="ml" style="display:block;margin-bottom:13px">Por Paciente — ${rangeLabel()}</span>
   ${patients.map(p=>{
     const sess=(p.sessions||[]).filter(s=>isBill(s)&&s.date>=from&&s.date<=to);
-    const{total:gerado,paid:pago,pending:pend}=sumBill(p,sess);const pct=gerado>0?(pago/gerado)*100:0;
-    if(!sess.length)return`<div style="padding:10px 0;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:9px;opacity:.35"><span class="ndot" style="background:${p.color}"></span><span style="font-size:13px;color:var(--cream);font-family:var(--sans)">${esc(p.name)}</span><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">sem sessões no período</span></div>`;
+    const{total:gerado,paid:pago,net:liq,pending:pend,pacotes:npk}=finPeriodo(p,from,to);const pct=gerado>0?(pago/gerado)*100:0;
+    if(!sess.length&&!npk)return`<div style="padding:10px 0;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:9px;opacity:.35"><span class="ndot" style="background:${p.color}"></span><span style="font-size:13px;color:var(--cream);font-family:var(--sans)">${esc(p.name)}</span><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">sem sessões no período</span></div>`;
     return`<div style="padding:11px 0;border-bottom:1px solid var(--bd)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:8px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:9px;cursor:pointer" onclick="go('patient',${p.id})"><span class="ndot" style="background:${p.color}"></span><span style="font-size:13px;color:var(--cream)">${esc(p.name)}</span><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">${sess.length} sess.</span></div>
-        <div style="display:flex;gap:13px;font-size:11px;font-family:var(--sans);flex-wrap:wrap"><span style="color:var(--dim)">Gerado: ${fmt(gerado)}</span><span style="color:var(--green)">Pago: ${fmt(pago)}</span><span style="color:${pend>0?'var(--red)':'var(--green)'}">Pend: ${fmt(pend)}</span>${pago>0?`<button class="btn bg bs" style="padding:3px 9px" onclick="receipt(${p.id},'${from}','${to}')">Recibo</button>`:''}</div>
+        <div style="display:flex;align-items:center;gap:9px;cursor:pointer" onclick="go('patient',${p.id})"><span class="ndot" style="background:${p.color}"></span><span style="font-size:13px;color:var(--cream)">${esc(p.name)}</span><span style="font-size:11px;color:var(--dim);font-family:var(--sans)">${sess.length} sess.${npk?' · 📦 pacote':''}</span></div>
+        <div style="display:flex;gap:13px;font-size:11px;font-family:var(--sans);flex-wrap:wrap"><span style="color:var(--dim)">Gerado: ${fmt(gerado)}</span><span style="color:var(--green)">Pago: ${fmt(pago)}${Math.abs(liq-pago)>0.004?` (líq. ${fmt(liq)})`:''}</span><span style="color:${pend>0?'var(--red)':'var(--green)'}">Pend: ${fmt(pend)}</span>${pago>0?`<button class="btn bg bs" style="padding:3px 9px" onclick="receipt(${p.id},'${from}','${to}')">Recibo</button>`:''}</div>
       </div>
       <div class="ptrack"><div class="pfill" style="width:${pct}%"></div></div>
     </div>`;
@@ -1159,9 +1184,27 @@ function updSessWhen(pid,sid,field,value){
 function flashSess(sid){setTimeout(()=>{const el=document.getElementById('sess-'+sid);const row=el&&el.closest('.sr');if(row){row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('flash');}},120);}
 function updSessStatus(pid,sid,status){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.status=status;syncPacotes(p);save();go('patient',pid,'sessoes');}
 function updSessField(pid,sid,field,value){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s[field]=value;save();}
-function markPaid(p,s,paid,method){s.paid=paid;s.paidAmount=paid?sv(p,s):0;s.paidDate=paid?td():'';if(paid&&method)s.payMethod=method;if(!paid)s.payMethod='';}
+function markPaid(p,s,paid,method){s.paid=paid;s.paidAmount=paid?sv(p,s):0;s.paidDate=paid?td():'';if(paid&&method)s.payMethod=method;if(!paid)s.payMethod='';s.paidNet=paid?liquidoDe(s.paidAmount,s.payMethod):0;}
+// Sessão sobressalente: realizada (conta presença e prontuário), mas sem cobrança
+function setSemCusto(pid,sid,on){
+  const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;
+  s.free=!!on;if(on){s.paid=false;s.paidAmount=0;s.paidNet=0;s.paidDate='';s.payMethod='';}
+  save();updateNav();go('patient',pid,'sessoes');flashSess(sid);
+  showToast(on?'Sessão marcada como sem custo (fora do faturamento).':'Sessão volta a ser cobrada.');
+}
+// O mês desta sessão já somou o valor mensal combinado com o paciente? (pagamento por sessão)
+function mesFechou(p,s){
+  const teto=Number(p.packageValue||0);if(!teto)return false;
+  const m=s.date.slice(0,7);
+  const pago=(p.sessions||[]).filter(x=>x!==s&&x.paid&&!x.pkg&&x.date.startsWith(m)).reduce((a,x)=>a+Number(x.paidAmount||0),0);
+  return pago>=teto-0.004;
+}
+// Trocar a forma recalcula o líquido pela taxa daquela forma
+function updPayMethod(pid,sid,m){const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;s.payMethod=m;s.paidNet=liquidoDe(s.paidAmount,m);save();go('patient',pid,'sessoes');flashSess(sid);}
+function editLiquido(pid,sid){const p=gp(pid),s=(p?.sessions||[]).find(x=>x.id===sid);if(!s)return;const v=prompt(`Quanto entrou de fato na sua conta por esta sessão (já sem taxas)?
+Valor cobrado: ${fmt(s.paidAmount)}`,netS(s).toFixed(2).replace('.',','));if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(!(n>=0))return;s.paidNet=n;save();go('patient',pid,'sessoes');flashSess(sid);}
 function togglePaid(pid,sid){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;if(s.pkg&&s.paid){if(!confirm('Esta sessão está paga dentro de um pacote. Tirar ela do pacote e marcar como não paga?'))return;s.pkgOut=true;s.pkg=null;}if(s.value==null)s.value=sv(p,s);markPaid(p,s,!s.paid,settings.defaultPay||'');save();go('patient',pid,'sessoes');}
-function updSessValue(pid,sid,v){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.value=parseFloat(v)||0;if(s.paid)s.paidAmount=s.value;save();updateNav();}
+function updSessValue(pid,sid,v){const p=gp(pid);if(!p)return;const s=(p.sessions||[]).find(s=>s.id===sid);if(!s)return;s.value=parseFloat(v)||0;if(s.paid){s.paidAmount=s.value;s.paidNet=liquidoDe(s.value,s.payMethod);}save();updateNav();}
 // Marca todas as sessões em aberto de um paciente como pagas (ex.: pagamento mensal)
 function payAll(pid){
   const p=gp(pid);if(!p)return;const list=unpaid(p);if(!list.length)return;
@@ -1241,7 +1284,7 @@ function extenso(v){
 
 function receipt(pid,from,to){
   const p=gp(pid);if(!p)return;
-  const list=(p.sessions||[]).filter(s=>isBill(s)&&s.paid&&!s.pkg&&s.date>=from&&s.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
+  const list=(p.sessions||[]).filter(s=>isBill(s)&&s.paid&&!s.pkg&&!s.free&&s.date>=from&&s.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
   if(!list.length){showToast((p.sessions||[]).some(s=>s.pkg&&s.date>=from&&s.date<=to)?'As sessões deste período estão num pacote: use "Recibo do pacote" em Combinados.':'Nenhuma sessão paga neste período.','err');return;}
   const total=list.reduce((a,s)=>a+Number(s.paidAmount||sv(p,s)),0);
   if(!settings.cpf||!p.cpf)showToast('Dica: preencha seu CPF (Configurações) e o do paciente para o recibo ficar completo.');
@@ -1289,6 +1332,16 @@ function rSettings(c){
     <div class="g2 fg" style="gap:13px">
       ${f('pixKey','Chave Pix (vai na mensagem de cobrança)')}
       <div class="fi"><label>Forma de pagamento padrão</label><select class="sel" onchange="updSetting('defaultPay',this.value)"><option value="">—</option>${PAYS.map(m=>`<option${settings.defaultPay===m?' selected':''}>${m}</option>`).join('')}</select></div>
+    </div>
+  </div>
+  <div class="card" style="max-width:560px;margin-bottom:14px">
+    <span class="ml" style="margin-bottom:10px">Taxas das formas de pagamento</span>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.8;margin-bottom:10px">
+      Quanto a maquininha, o banco ou o Mercado Pago descontam (%). O app calcula sozinho o valor que <strong style="color:#ccc">cai na sua conta</strong>, e você ainda pode corrigir em cada pagamento.
+      Ex.: R$ 400 com 0,99% → R$ 396,04.
+    </div>
+    <div class="g3 fg" style="gap:10px">
+      ${PAYS.filter(m=>m!=='Dinheiro').map(m=>`<div class="fi"><label>${m} (%)</label><input type="number" min="0" max="30" step="0.01" class="inp" value="${(settings.taxas||{})[m]??''}" placeholder="0" onchange="settings.taxas={...(settings.taxas||{}),['${m}']:parseFloat(this.value)||0};save()"></div>`).join('')}
     </div>
   </div>
   <div class="card" style="max-width:560px;margin-bottom:14px">
@@ -1519,6 +1572,9 @@ function gerarSessoes(pids,mes){
       (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});
       criadas++;
     }
+    // Quem tem pacote: completa o ciclo inteiro do pacote que toca este mês (ex.: até 13/11)
+    const ini=`${mes}-01`,fimM=`${mes}-${String(fim).padStart(2,'0')}`;
+    (p.pacotes||[]).filter(k=>k.from<=fimM&&k.to>=ini&&k.to>fimM).forEach(k=>{criadas+=gerarIntervalo(p,fimM<hoje?hoje:fimM,k.to);});
     sortSess(p);syncPacotes(p);
   });
   save();render();
@@ -1535,7 +1591,7 @@ function pacoteCobrindo(p,date){return(p.pacotes||[]).find(k=>date>=k.from&&date
 function fimPacote(ini){const d=new Date(ini+'T12:00'),dia=d.getDate();d.setMonth(d.getMonth()+1);if(d.getDate()!==dia){d.setDate(0);return isoD(d);}d.setDate(d.getDate()-1);return isoD(d);}
 function syncPacotes(p){
   (p.sessions||[]).forEach(s=>{
-    if(s.status==='cancelada'||s.pkgOut){if(s.pkg){s.pkg=null;s.paid=false;s.paidAmount=0;s.paidDate='';s.payMethod='';}return;}
+    if(s.status==='cancelada'||s.pkgOut||s.free){if(s.pkg){s.pkg=null;s.paid=false;s.paidAmount=0;s.paidDate='';s.payMethod='';}return;}
     const k=pacoteCobrindo(p,s.date);
     if(k){if(s.value==null)s.value=sv(p,s);s.pkg=k.id;s.paid=true;s.paidAmount=sv(p,s);s.paidDate=k.date;s.payMethod=k.method||'';}
     else if(s.pkg){s.pkg=null;s.paid=false;s.paidAmount=0;s.paidDate='';s.payMethod='';}
@@ -1547,34 +1603,59 @@ function sessoesPrevistas(p,from,to){
   for(let d=new Date(from+'T12:00');isoD(d)<=to;d.setDate(d.getDate()+1))if(sch[d.getDay()])n++;
   return n;
 }
-function pkSugerir(pid){
+// Dia seguinte ao fim do pacote = dia da renovação (ex.: 13/11 → 14/11)
+function diaSeguinte(iso){const d=new Date(iso+'T12:00');d.setDate(d.getDate()+1);return isoD(d);}
+// Atualiza o formulário do pacote: período do ciclo, valor padrão e líquido pela taxa
+function pkSugerir(pid,campo){
   const p=gp(pid),g=id=>document.getElementById(id);if(!p||!g('pk-date'))return;
   const ini=g('pk-date').value;if(!ini)return;
   if(!g('pk-to').dataset.manual)g('pk-to').value=fimPacote(ini);
-  const n=sessoesPrevistas(p,ini,g('pk-to').value);
-  g('pk-info').textContent=n?`${n} sessão(ões) previstas pelo horário fixo · ${fmt(n*Number(p.sessionValue||0))}`:'Sem horário fixo: informe o valor combinado.';
-  if(!g('pk-val').dataset.manual&&n)g('pk-val').value=(n*Number(p.sessionValue||0)).toFixed(2);
+  const to=g('pk-to').value,n=sessoesPrevistas(p,ini,to);
+  if(!g('pk-val').dataset.manual){
+    const sug=Number(p.packageValue||0)||n*Number(p.sessionValue||0);
+    if(sug)g('pk-val').value=sug.toFixed(2);
+  }
+  if(campo!=='net'&&!g('pk-net').dataset.manual)g('pk-net').value=liquidoDe(g('pk-val').value,g('pk-met').value).toFixed(2);
+  const taxa=taxaDe(g('pk-met').value);
+  g('pk-info').textContent=`Ciclo de ${fmtD(ini)} a ${fmtD(to)} · renova em ${fmtD(diaSeguinte(to))}`+(n?` · ${n} sessão(ões) pelo horário fixo`:'')+(taxa?` · taxa ${String(taxa).replace('.',',')}%`:'');
+}
+// Cria sessões pelo horário fixo entre duas datas (inclusive), sem duplicar
+function gerarIntervalo(p,from,to){
+  let criadas=0;if(!p.schedule)return 0;
+  for(let d=new Date(from+'T12:00');isoD(d)<=to;d.setDate(d.getDate()+1)){
+    const t=p.schedule[d.getDay()],iso=isoD(d);if(!t||(p.sessions||[]).some(s=>s.date===iso))continue;
+    (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});criadas++;
+  }
+  sortSess(p);return criadas;
 }
 function addPacote(pid){
   const p=gp(pid),g=id=>document.getElementById(id);if(!p)return;
   const date=g('pk-date').value,to=g('pk-to').value,amount=parseFloat(g('pk-val').value)||0;
+  const net=g('pk-net').value===''?liquidoDe(amount,g('pk-met').value):parseFloat(g('pk-net').value)||0;
   if(!date||!to||to<date){showToast('Confira as datas do pacote.','err');return;}
   const choque=(p.pacotes||[]).find(k=>date<=k.to&&to>=k.from);
   if(choque&&!confirm(`Já existe um pacote de ${fmtD(choque.from)} a ${fmtD(choque.to)} que se sobrepõe a este. Registrar mesmo assim?`))return;
-  const k={id:novoId(),date,from:date,to,amount,method:g('pk-met').value};
+  const k={id:novoId(),date,from:date,to,amount,net,method:g('pk-met').value};
   (p.pacotes=p.pacotes||[]).push(k);
-  // Já agenda as sessões do período pelo horário fixo (sem duplicar)
-  let criadas=0;
-  if(g('pk-gerar')?.checked&&p.schedule){
-    for(let d=new Date(Math.max(new Date(date+'T12:00'),new Date(td()+'T12:00')));isoD(d)<=to;d.setDate(d.getDate()+1)){
-      const t=p.schedule[d.getDay()],iso=isoD(d);if(!t||(p.sessions||[]).some(s=>s.date===iso))continue;
-      (p.sessions=p.sessions||[]).push({id:novoId(),date:iso,time:t,status:'agendada',value:Number(p.sessionValue||0),paid:false,paidAmount:0,mood:'',themes:'',notes:''});criadas++;
-    }
-    sortSess(p);
-  }
+  if(!p.packageValue&&amount)p.packageValue=amount;   // primeiro pacote vira o valor padrão
+  // Agenda as sessões de TODO o ciclo (do dia do pagamento até a véspera da renovação)
+  const criadas=g('pk-gerar')?.checked?gerarIntervalo(p,date,to):0;
   syncPacotes(p);save();updateNav();go('patient',pid,'combinados');
   const cob=(p.sessions||[]).filter(s=>s.pkg===k.id).length;
-  showToast(`Pacote registrado até ${fmtD(to)}: ${cob} sessão(ões) marcadas como pagas${criadas?` (${criadas} agendada(s) agora)`:''}.`);
+  showToast(`Pacote de ${fmtD(date)} a ${fmtD(to)}: ${cob} sessão(ões) pagas${criadas?` (${criadas} agendada(s) agora)`:''}. Na conta: ${fmt(net)}.`);
+}
+// Agenda (ou completa) as sessões de um pacote já registrado
+function agendarPacote(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  if(!p.schedule||!Object.keys(p.schedule).length){showToast('Defina o horário fixo (abaixo) primeiro.','err');return;}
+  const n=gerarIntervalo(p,k.from,k.to);syncPacotes(p);save();go('patient',pid,'combinados');
+  showToast(n?`${n} sessão(ões) agendada(s) de ${fmtD(k.from)} a ${fmtD(k.to)}.`:'O ciclo já está todo agendado.');
+}
+// Corrige o valor que entrou na conta de um pacote
+function editLiqPacote(pid,kid){
+  const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
+  const v=prompt(`Quanto entrou de fato na sua conta (já sem taxas)?\nValor do pacote: ${fmt(k.amount)}`,netK(k).toFixed(2).replace('.',','));if(v===null)return;
+  const n=parseFloat(String(v).replace(',','.'));if(!(n>=0))return;k.net=n;save();go('patient',pid,'combinados');
 }
 function delPacote(pid,kid){
   const p=gp(pid),k=pacoteDe(p,kid);if(!k)return;
@@ -1629,20 +1710,26 @@ function rCombinados(p){
   const ativo=pacoteCobrindo(p,td());
   const pacoteCard=`<div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span class="ml" style="margin-bottom:0">📦 Pagamento antecipado (pacote)</span>
-      ${ativo?`<span style="font-size:12px;color:var(--green);font-family:var(--sans)">Pacote ativo até ${fmtD(ativo.to)}</span>`:''}</div>
-    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:10px">Quando o paciente paga o mês adiantado: todas as sessões do período ficam pagas sozinhas, inclusive as criadas depois.</div>
-    <div class="g4 fg" style="gap:10px;align-items:end">
-      <div class="fi"><label>Pago em</label><input type="date" class="inp" id="pk-date" value="${td()}" onchange="pkSugerir(${p.id})"></div>
-      <div class="fi"><label>Válido até</label><input type="date" class="inp" id="pk-to" value="${fimPacote(td())}" onchange="this.dataset.manual='1';pkSugerir(${p.id})"></div>
-      <div class="fi"><label>Valor recebido (R$)</label><input type="number" min="0" step="0.01" class="inp" id="pk-val" oninput="this.dataset.manual='1'"></div>
-      <div class="fi"><label>Forma</label><select class="sel" id="pk-met">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select></div>
+      ${ativo?`<span style="font-size:12px;color:var(--green);font-family:var(--sans)">Ciclo atual: ${fmtD(ativo.from)} a ${fmtD(ativo.to)} · renova em ${fmtD(diaSeguinte(ativo.to))}</span>`:''}</div>
+    <div style="font-size:12px;color:#999;font-family:var(--sans);line-height:1.7;margin-bottom:10px">O mês do pacote conta a partir do dia do pagamento (pagou dia 14 → sessões de 14 até 13 do mês seguinte; renova no dia 14). Todas as sessões do ciclo ficam pagas sozinhas, inclusive as criadas depois.</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-family:var(--sans);font-size:12px;color:#bbb">
+      Valor mensal combinado com este paciente: R$
+      <input type="number" min="0" step="0.01" class="inp" style="width:110px;padding:5px 8px" value="${p.packageValue||''}" placeholder="ex.: 400" onchange="updPat(${p.id},'packageValue',parseFloat(this.value)||0);const v=document.getElementById('pk-val');if(v&&!v.dataset.manual){v.value=(parseFloat(this.value)||0).toFixed(2);pkSugerir(${p.id})}">
+      <span style="color:var(--dim);font-size:11px">(fica salvo. Serve para o pacote antecipado e, para quem paga por sessão, para avisar quando o mês já fechou e a próxima sessão é sem custo)</span>
+    </div>
+    <div class="g3 fg" style="gap:10px;align-items:end">
+      <div class="fi"><label>Pago em (início do ciclo)</label><input type="date" class="inp" id="pk-date" value="${td()}" onchange="pkSugerir(${p.id})"></div>
+      <div class="fi"><label>Último dia do ciclo</label><input type="date" class="inp" id="pk-to" value="${fimPacote(td())}" onchange="this.dataset.manual='1';pkSugerir(${p.id})"></div>
+      <div class="fi"><label>Forma</label><select class="sel" id="pk-met" onchange="pkSugerir(${p.id})">${PAYS.map(m=>`<option${(settings.defaultPay||'Pix')===m?' selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="fi"><label>Valor do pacote (R$)</label><input type="number" min="0" step="0.01" class="inp" id="pk-val" oninput="this.dataset.manual='1';pkSugerir(${p.id})"></div>
+      <div class="fi"><label>Caiu na conta (R$, sem taxas)</label><input type="number" min="0" step="0.01" class="inp" id="pk-net" oninput="this.dataset.manual='1';pkSugerir(${p.id},'net')"></div>
     </div>
     <div id="pk-info" style="font-size:11px;color:var(--gold);font-family:var(--sans);margin:-4px 0 8px"></div>
     ${p.schedule&&Object.keys(p.schedule).length?`<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;font-family:var(--sans);margin-bottom:10px"><input type="checkbox" id="pk-gerar" checked> Já agendar as sessões do período pelo horário fixo (${esc(horariosTxt(p))})</label>`:`<div style="font-size:11px;color:var(--dim);font-family:var(--sans);margin-bottom:10px">Dica: defina o horário fixo abaixo para o app já agendar as sessões do pacote.</div>`}
     <button class="btn bp bs" onclick="addPacote(${p.id})">Registrar pacote</button>
     ${pks.length?`<div class="divl"></div>${pks.map(k=>{const n=(p.sessions||[]).filter(s=>s.pkg===k.id).length;return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap;font-family:var(--sans);font-size:12px">
-      <span style="color:${k===ativo?'var(--green)':'#bbb'}">${fmtD(k.from)} → ${fmtD(k.to)} · ${fmt(k.amount)}${k.method?' · '+esc(k.method):''} · ${n} sessão(ões)</span>
-      <span style="display:flex;gap:6px"><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
+      <span style="color:${k===ativo?'var(--green)':'#bbb'};line-height:1.6">${fmtD(k.from)} a ${fmtD(k.to)} · ${fmt(k.amount)}${Math.abs(netK(k)-k.amount)>0.004?` · <span style="cursor:pointer;text-decoration:underline dotted" title="Corrigir o valor que entrou na conta" onclick="editLiqPacote(${p.id},${k.id})">na conta ${fmt(netK(k))}</span>`:` · <span style="cursor:pointer;color:var(--dim);text-decoration:underline dotted" onclick="editLiqPacote(${p.id},${k.id})">informar taxa</span>`}${k.method?' · '+esc(k.method):''} · ${n} sessão(ões)</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn bg bs" onclick="agendarPacote(${p.id},${k.id})">Agendar ciclo</button><button class="btn bg bs" onclick="reciboPacote(${p.id},${k.id})">Recibo</button><button class="btn brd bs" onclick="delPacote(${p.id},${k.id})">✕</button></span></div>`;}).join('')}`:''}
   </div>`;
   setTimeout(()=>pkSugerir(p.id),0);
   return`${pacoteCard}<div class="g2">
@@ -1652,7 +1739,8 @@ function rCombinados(p){
       ${linhas}
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px">
         <input type="month" class="inp" id="gen-mes" style="width:auto;padding:6px 10px;font-size:12px" value="${td().slice(0,7)}">
-        <button class="btn bp bs" onclick="gerarSessoes([${p.id}],document.getElementById('gen-mes').value)">Gerar sessões do mês</button>
+${ativo?`<button class="btn bp bs" onclick="agendarPacote(${p.id},${ativo.id})">Gerar ciclo do pacote (${fmtD(ativo.from).slice(0,5)} a ${fmtD(ativo.to).slice(0,5)})</button>`:''}
+        <button class="btn ${ativo?'bg':'bp'} bs" onclick="gerarSessoes([${p.id}],document.getElementById('gen-mes').value)">Gerar sessões do mês</button>
       </div>
     </div>
     <div class="card">
@@ -1750,16 +1838,16 @@ let caixaAno=new Date().getFullYear(),caixaMes=null;
 // Recebimentos: sessões pagas, pela data do pagamento
 function recebimentos(){
   const r=[];
-  patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&!s.pkg&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),p,s})));
+  patients.forEach(p=>(p.sessions||[]).filter(s=>s.paid&&!s.pkg&&Number(s.paidAmount||0)>0).forEach(s=>r.push({data:s.paidDate||s.date,valor:Number(s.paidAmount),liquido:netS(s),p,s})));
   // Pacotes entram pelo valor realmente recebido, na data do pagamento
-  patients.forEach(p=>(p.pacotes||[]).filter(k=>Number(k.amount)>0).forEach(k=>r.push({data:k.date,valor:Number(k.amount),p,s:{date:k.from,payMethod:k.method},pacote:k})));
+  patients.forEach(p=>(p.pacotes||[]).filter(k=>Number(k.amount)>0).forEach(k=>r.push({data:k.date,valor:Number(k.amount),liquido:netK(k),p,s:{date:k.from,payMethod:k.method},pacote:k})));
   return r.sort((a,b)=>a.data.localeCompare(b.data));
 }
 function rCaixa(c){
   const ano=String(caixaAno),rec=recebimentos().filter(x=>x.data.startsWith(ano)),des=despesas.filter(d=>(d.date||'').startsWith(ano));
   const meses=Array.from({length:12},(_,i)=>{const m=`${ano}-${String(i+1).padStart(2,'0')}`;
-    const r=rec.filter(x=>x.data.startsWith(m)).reduce((a,x)=>a+x.valor,0),d=des.filter(x=>x.date.startsWith(m)).reduce((a,x)=>a+Number(x.value||0),0);return{m,r,d};});
-  const tR=meses.reduce((a,x)=>a+x.r,0),tD=meses.reduce((a,x)=>a+x.d,0);
+    const rr=rec.filter(x=>x.data.startsWith(m)),r=rr.reduce((a,x)=>a+x.valor,0),l=rr.reduce((a,x)=>a+x.liquido,0),d=des.filter(x=>x.date.startsWith(m)).reduce((a,x)=>a+Number(x.value||0),0);return{m,r,l,d};});
+  const tR=meses.reduce((a,x)=>a+x.r,0),tL=meses.reduce((a,x)=>a+x.l,0),tD=meses.reduce((a,x)=>a+x.d,0);
   const nm=m=>new Date(m+'-15T12:00').toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
   let det='';
   if(caixaMes){
@@ -1769,7 +1857,7 @@ function rCaixa(c){
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="ml" style="margin-bottom:0">Detalhe de ${nomeM}</span>
         <div style="display:flex;gap:6px"><button class="btn bgo bs" onclick="csvCarne('${caixaMes}')">↓ Planilha do mês (carnê-leão)</button><button class="btn bg bs" onclick="caixaMes=null;rCaixa(document.getElementById('cnt'))">Fechar</button></div></div>
       <div class="ml" style="color:var(--green)">Recebimentos (${r.length}) · ${fmt(r.reduce((a,x)=>a+x.valor,0))}</div>
-      ${r.length?r.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:#ccc">${fmtD(x.data)} · ${esc(x.p.name)}${x.pacote?' · 📦 pacote até '+fmtD(x.pacote.to).slice(0,5):''}${x.p.cpf?' · CPF '+esc(x.p.cpf):' · <span style="color:var(--red)">sem CPF</span>'}</span><span style="color:var(--green)">${fmt(x.valor)}${x.s.payMethod?' · '+esc(x.s.payMethod):''}</span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhum recebimento.</div>'}
+      ${r.length?r.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:#ccc">${fmtD(x.data)} · ${esc(x.p.name)}${x.pacote?' · 📦 pacote até '+fmtD(x.pacote.to).slice(0,5):''}${x.p.cpf?' · CPF '+esc(x.p.cpf):' · <span style="color:var(--red)">sem CPF</span>'}</span><span style="color:var(--green)">${fmt(x.valor)}${Math.abs(x.liquido-x.valor)>0.004?` → na conta ${fmt(x.liquido)}`:''}${x.s.payMethod?' · '+esc(x.s.payMethod):''}</span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhum recebimento.</div>'}
       <div class="ml" style="color:var(--red);margin-top:14px">Despesas (${d.length}) · ${fmt(d.reduce((a,x)=>a+Number(x.value||0),0))}</div>
       ${d.length?d.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-family:var(--sans);font-size:12px;align-items:center"><span style="color:#ccc">${fmtD(x.date)} · ${esc(x.desc||x.cat)} <span style="color:var(--dim)">(${esc(x.cat)})</span></span><span style="display:flex;gap:8px;align-items:center"><span style="color:var(--red)">${fmt(x.value)}</span><button class="btn brd bs" style="padding:2px 7px" onclick="delDespesa(${x.id})">✕</button></span></div>`).join(''):'<div style="font-size:12px;color:var(--dim);font-family:var(--sans)">Nenhuma despesa.</div>'}
     </div>`;
@@ -1777,12 +1865,12 @@ function rCaixa(c){
   c.innerHTML=`
   <div class="card" style="margin-bottom:14px;padding:14px 18px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:8px"><button class="btn bg bs" onclick="caixaAno--;caixaMes=null;rCaixa(document.getElementById('cnt'))">‹</button><span style="font-size:18px;color:var(--gold)">${ano}</span><button class="btn bg bs" onclick="caixaAno++;caixaMes=null;rCaixa(document.getElementById('cnt'))">›</button></div>
-    <div style="display:flex;gap:16px;font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:var(--green)">Recebido ${fmt(tR)}</span><span style="color:var(--red)">Despesas ${fmt(tD)}</span><span style="color:var(--cream)">Resultado ${fmt(tR-tD)}</span></div>
+    <div style="display:flex;gap:16px;font-family:var(--sans);font-size:12px;flex-wrap:wrap"><span style="color:var(--dim)">Cobrado ${fmt(tR)}</span><span style="color:var(--green)">Na conta ${fmt(tL)}</span><span style="color:var(--red)">Despesas ${fmt(tD)}</span><span style="color:var(--cream)">Resultado ${fmt(tL-tD)}</span></div>
   </div></div>
   <div class="card" style="margin-bottom:14px"><span class="ml" style="margin-bottom:8px">Mês a mês (toque num mês para ver o detalhe)</span>
-    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:var(--sans);font-size:12px;min-width:340px">
-      <tr style="color:var(--dim);text-align:right"><th style="text-align:left;padding:6px;font-weight:400">Mês</th><th style="padding:6px;font-weight:400">Recebido</th><th style="padding:6px;font-weight:400">Despesas</th><th style="padding:6px;font-weight:400">Resultado</th></tr>
-      ${meses.map(x=>`<tr onclick="caixaMes='${x.m}';rCaixa(document.getElementById('cnt'))" style="cursor:pointer;border-top:1px solid var(--bd);text-align:right;${caixaMes===x.m?'background:#1a1508':''}"><td style="text-align:left;padding:7px 6px;color:var(--cream);text-transform:capitalize">${nm(x.m)}</td><td style="padding:7px 6px;color:${x.r?'var(--green)':'var(--dim)'}">${fmt(x.r)}</td><td style="padding:7px 6px;color:${x.d?'var(--red)':'var(--dim)'}">${fmt(x.d)}</td><td style="padding:7px 6px;color:var(--cream)">${fmt(x.r-x.d)}</td></tr>`).join('')}
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-family:var(--sans);font-size:12px;min-width:420px">
+      <tr style="color:var(--dim);text-align:right"><th style="text-align:left;padding:6px;font-weight:400">Mês</th><th style="padding:6px;font-weight:400">Cobrado</th><th style="padding:6px;font-weight:400">Na conta</th><th style="padding:6px;font-weight:400">Despesas</th><th style="padding:6px;font-weight:400">Resultado</th></tr>
+      ${meses.map(x=>`<tr onclick="caixaMes='${x.m}';rCaixa(document.getElementById('cnt'))" style="cursor:pointer;border-top:1px solid var(--bd);text-align:right;${caixaMes===x.m?'background:#1a1508':''}"><td style="text-align:left;padding:7px 6px;color:var(--cream);text-transform:capitalize">${nm(x.m)}</td><td style="padding:7px 6px;color:var(--dim)">${fmt(x.r)}</td><td style="padding:7px 6px;color:${x.l?'var(--green)':'var(--dim)'}">${fmt(x.l)}</td><td style="padding:7px 6px;color:${x.d?'var(--red)':'var(--dim)'}">${fmt(x.d)}</td><td style="padding:7px 6px;color:var(--cream)">${fmt(x.l-x.d)}</td></tr>`).join('')}
     </table></div>
   </div>
   ${det}
@@ -1816,9 +1904,10 @@ function delDespesa(id){if(!confirm('Excluir esta despesa?'))return;despesas=des
 function csvCarne(mes){
   const q=v=>String(v??'').replace(/"/g,'""');
   const r=recebimentos().filter(x=>x.data.startsWith(mes)),d=despesas.filter(x=>(x.date||'').startsWith(mes));
-  let csv=`Livro-caixa ${mes}\n\nRECEBIMENTOS\nData pagamento,Paciente (pagador),CPF,Data da sessao,Forma,Valor\n`;
-  r.forEach(x=>{csv+=`"${fmtD(x.data)}","${q(x.p.name)}","${q(x.p.cpf)}","${x.pacote?'Pacote '+fmtD(x.pacote.from)+' a '+fmtD(x.pacote.to):fmtD(x.s.date)}","${q(x.s.payMethod)}","${x.valor.toFixed(2).replace('.',',')}"\n`;});
-  csv+=`"","","","","Total","${r.reduce((a,x)=>a+x.valor,0).toFixed(2).replace('.',',')}"\n\nDESPESAS\nData,Categoria,Descricao,Valor\n`;
+  const br=v=>Number(v).toFixed(2).replace('.',',');
+  let csv=`Livro-caixa ${mes}\n\nRECEBIMENTOS\nData pagamento,Paciente (pagador),CPF,Referente a,Forma,Valor cobrado,Taxas,Valor na conta\n`;
+  r.forEach(x=>{csv+=`"${fmtD(x.data)}","${q(x.p.name)}","${q(x.p.cpf)}","${x.pacote?'Pacote '+fmtD(x.pacote.from)+' a '+fmtD(x.pacote.to):'Sessao '+fmtD(x.s.date)}","${q(x.s.payMethod)}","${br(x.valor)}","${br(x.valor-x.liquido)}","${br(x.liquido)}"\n`;});
+  csv+=`"","","","","Total","${br(r.reduce((a,x)=>a+x.valor,0))}","${br(r.reduce((a,x)=>a+x.valor-x.liquido,0))}","${br(r.reduce((a,x)=>a+x.liquido,0))}"\n\nDESPESAS\nData,Categoria,Descricao,Valor\n`;
   d.forEach(x=>{csv+=`"${fmtD(x.date)}","${q(x.cat)}","${q(x.desc)}","${Number(x.value).toFixed(2).replace('.',',')}"\n`;});
   csv+=`"","","Total","${d.reduce((a,x)=>a+Number(x.value||0),0).toFixed(2).replace('.',',')}"\n`;
   const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`livro-caixa_${mes}.csv`;a.click();
@@ -1894,12 +1983,12 @@ function exportCSV(type){
   }else if(type==='financeiro'){
     csv=`Periodo: ${fmtD(from)} a ${fmtD(to)}\n\n`;
     csv+='Paciente,Sessoes,Valor Sessao,Gerado,Pago,Pendente\n';
-    patients.forEach(p=>{const b=sumBill(p,(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to));csv+=`"${p.name.replace(/"/g,'""')}","${b.count}","${p.sessionValue}","${b.total.toFixed(2)}","${b.paid.toFixed(2)}","${b.pending.toFixed(2)}"\n`;});
+    patients.forEach(p=>{const b=finPeriodo(p,from,to);csv+=`"${p.name.replace(/"/g,'""')}","${b.count}","${p.sessionValue}","${b.total.toFixed(2)}","${b.paid.toFixed(2)}","${b.pending.toFixed(2)}"\n`;});
     filename=`financeiro_${finFilter}_${td()}.csv`;
   }else if(type==='sessoes'){
     csv='Paciente,Data,Horario,Status,Humor,Temas,Pago,Data Pagamento,Forma,Valor,Anotacoes\n';
     const q=v=>String(v??'').replace(/"/g,'""');
-    patients.forEach(p=>{(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to).forEach(s=>{csv+=`"${q(p.name)}","${fmtD(s.date)}","${s.time}","${ST[s.status]?.label||s.status}","${q(s.mood)}","${q(s.themes)}","${s.paid?'Sim':'Nao'}","${s.paidDate?fmtD(s.paidDate):''}","${q(s.payMethod)}","${isBill(s)?sv(p,s):0}","${q(s.notes)}"\n`;});});
+    patients.forEach(p=>{(p.sessions||[]).filter(s=>s.date>=from&&s.date<=to).forEach(s=>{csv+=`"${q(p.name)}","${fmtD(s.date)}","${s.time}","${ST[s.status]?.label||s.status}","${q(s.mood)}","${q(s.themes)}","${s.paid?'Sim':'Nao'}","${s.paidDate?fmtD(s.paidDate):''}","${q(s.payMethod)}","${isBill(s)&&!s.free?sv(p,s):0}","${q(s.notes)}"\n`;});});
     filename=`sessoes_${finFilter}_${td()}.csv`;
   }else if(type==='completo'){exportCSV('pacientes');setTimeout(()=>exportCSV('financeiro'),300);setTimeout(()=>exportCSV('sessoes'),600);closeModal('modal-export');return;}
   const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
